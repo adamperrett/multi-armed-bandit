@@ -850,5 +850,4 @@ with open('movement {}.csv'.format((port_offset-counter)/number_of_runs), 'w') a
                      agent_pop[order[0]][genetic_length - 1]])
 best_fitness2 = agent_fitness(order[0], 200, -np.pi/4, True)
 
-
 print "\n shit finished yo!!"
