@@ -17,8 +17,8 @@ copy_population = False
 only_improve = False
 total_runtime = 10000
 time_slice = 100
-pop_size = 10
-reset_count = 5
+pop_size = 20
+reset_count = 10
 no_move_punishment = 3.
 agent_neurons = 6
 neuron_pop_size = 1
@@ -413,10 +413,12 @@ def poisson_setting(label, connection):
     global current_light_theta
     global print_move
     global number_of_runs
-    float_time = float(time_slice)/1000
+    float_time = float(time_slice-2)/1000
     temp_motors = [0 for i in range(4)]
+    # time_length = []
     for i in range(0,total_runtime,time_slice):
         time.sleep(float_time)
+        # start = time.time()
         for j in range(4):
             temp_motors[j] = motor_spikes[j]
         # update location
@@ -426,9 +428,9 @@ def poisson_setting(label, connection):
         # calc new poisson rates
         sensor_poisson = poisson_rate(current_agent, current_light_distance, current_light_theta)
         #connection.set_rates("input_spikes1", [sensor_poisson[0]])
-        print "\n"
-        print label
-        print "\n"
+        # print "\n"
+        # print label
+        # print "\n"
         # set poisson rates
         for j in range(visual_discrete):
             print "managed ",j
@@ -443,6 +445,15 @@ def poisson_setting(label, connection):
                 writer.writerow([agent_pop[current_agent][genetic_length - 3], agent_pop[current_agent][genetic_length - 2],
                                  agent_pop[current_agent][genetic_length - 1],
                                  temp_motors[0], temp_motors[1], temp_motors[2], temp_motors[3]])
+    #     finish = time.time()
+    #     time_length.append((finish-start))
+    #     print "\ntotal time for run = {}\n".format(finish - start)
+    # average = 0.0
+    # for i in range(len(time_length)):
+    #     average += time_length[i]
+    # average = average/i
+    # print "\naverage time for run = {}\n".format(average)
+
 
 
 def agent_fitness(agent, light_distance, light_theta, print_move):
@@ -523,7 +534,7 @@ def agent_fitness(agent, light_distance, light_theta, print_move):
         visual_projection.append(p.Projection(
             visual_input[i], neuron_pop[i], p.OneToOneConnector(), p.StaticSynapse(
                 weight=visual_weight, delay=visual_delay)))
-        p.external_devices.add_poisson_live_rate_control(visual_input[i])
+        p.external_devices.add_poisson_live_rate_control(visual_input[i], database_notify_port_num=16000+port_offset)
         # poisson_control = p.external_devices.SpynnakerPoissonControlConnection(poisson_labels=[visual_input[i].label])#,local_port=18000+(port_offset*visual_discrete)+i)
         # poisson_control.add_start_callback(visual_input[i].label, poisson_setting)
     # visual_input = p.Population(visual_discrete, p.SpikeSourcePoisson(rate=sensor_poisson), label=input)
