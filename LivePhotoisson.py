@@ -15,8 +15,8 @@ import pandas
 seed_population = False
 copy_population = False
 only_improve = False
-total_runtime = 3000
-time_slice = 1000
+total_runtime = 10000
+time_slice = 100
 pop_size = 10
 reset_count = 5
 no_move_punishment = 3.
@@ -433,7 +433,8 @@ def poisson_setting(label, connection):
         for j in range(visual_discrete):
             print "managed ",j
             #visual_input[j].set(rate=sensor_poisson[j])
-            connection.set_rates("input_spikes{}_control".format(j), [(j, int(sensor_poisson[j]))])
+            connection.set_rates("input_spikes{}_control".format(j), [(0, int(sensor_poisson[j]))])
+            # connection.set_rates(label, [(0, int(sensor_poisson[j]))])
         print "did a run {}/{}, time now at {}/{} and fitness = {}/{}".format\
             (counter, number_of_runs, i + time_slice, total_runtime, current_fitness, current_light_distance * ((i / time_slice) + 1))
         if print_move == True:
@@ -442,7 +443,7 @@ def poisson_setting(label, connection):
                 writer.writerow([agent_pop[current_agent][genetic_length - 3], agent_pop[current_agent][genetic_length - 2],
                                  agent_pop[current_agent][genetic_length - 1],
                                  temp_motors[0], temp_motors[1], temp_motors[2], temp_motors[3]])
-    #connection.poisson_setting(label, connection)
+
 
 def agent_fitness(agent, light_distance, light_theta, print_move):
     global port_offset
@@ -514,12 +515,27 @@ def agent_fitness(agent, light_distance, light_theta, print_move):
     #sensor_poisson = [0 for j in range(visual_discrete)]
     sensor_poisson = poisson_rate(agent, light_distance, light_theta)
 
-    visual_input = p.Population(visual_discrete, p.SpikeSourcePoisson(rate=sensor_poisson), label=input)
-    p.Projection(
-        visual_input, neuron_pop[(i for i in range(0,2))], p.OneToOneConnector(), p.StaticSynapse(weight=visual_weight, delay=visual_delay))
-    p.external_devices.add_poisson_live_rate_control(visual_input)
-    poisson_control = p.external_devices.SpynnakerPoissonControlConnection(poisson_labels=[visual_input.label])
-    poisson_control.add_start_callback(visual_input.label, poisson_setting)
+    for i in range(visual_discrete):
+        print i
+        input_labels.append("input_spikes{}".format(i))
+        visual_input.append(p.Population(
+            1, p.SpikeSourcePoisson(rate=sensor_poisson[i]), label=input_labels[i]))
+        visual_projection.append(p.Projection(
+            visual_input[i], neuron_pop[i], p.OneToOneConnector(), p.StaticSynapse(
+                weight=visual_weight, delay=visual_delay)))
+        p.external_devices.add_poisson_live_rate_control(visual_input[i])
+        # poisson_control = p.external_devices.SpynnakerPoissonControlConnection(poisson_labels=[visual_input[i].label])#,local_port=18000+(port_offset*visual_discrete)+i)
+        # poisson_control.add_start_callback(visual_input[i].label, poisson_setting)
+    # visual_input = p.Population(visual_discrete, p.SpikeSourcePoisson(rate=sensor_poisson), label=input)
+    # p.Projection(
+    #     visual_input, neuron_pop[(i for i in range(0,visual_discrete))], p.OneToOneConnector(), p.StaticSynapse(weight=visual_weight, delay=visual_delay))
+    # p.external_devices.add_poisson_live_rate_control(visual_input)
+    poisson_control = p.external_devices.SpynnakerPoissonControlConnection(poisson_labels=input_labels, local_port=16000+port_offset)
+    poisson_control.add_start_callback(visual_input[0].label, poisson_setting)
+    # poisson_control.add_start_callback(visual_input[1].label, empty_function)
+    # poisson_control2 = p.external_devices.SpynnakerPoissonControlConnection(poisson_labels=[visual_input[1].label],local_port=19998)#+(port_offset*visual_discrete)+i)
+    # poisson_control2.add_start_callback(visual_input[1].label, poisson_setting2)
+    # poisson_control.add_start_callback(visual_input[1].label, poisson_setting)
 
     # for i in range(visual_discrete):
     #     print i
@@ -541,9 +557,9 @@ def agent_fitness(agent, light_distance, light_theta, print_move):
     for i in range(4):
         print i
         motor_labels.append(neuron_labels[agent_neurons - (i + 1)])
-        p.external_devices.activate_live_output_for(neuron_pop[agent_neurons - (i + 1)], database_notify_port_num=19800+port_offset)
+        p.external_devices.activate_live_output_for(neuron_pop[agent_neurons - (i + 1)], database_notify_port_num=18000+port_offset)
     live_connection = p.external_devices.SpynnakerLiveSpikesConnection(
-        receive_labels=[motor_labels[0], motor_labels[1], motor_labels[2],motor_labels[3]], local_port=(19800+port_offset))
+        receive_labels=[motor_labels[0], motor_labels[1], motor_labels[2],motor_labels[3]], local_port=(18000+port_offset))
     for i in range(4):
         live_connection.add_receive_callback(motor_labels[i], receive_spikes)
     #fitness = 0
