@@ -23,12 +23,12 @@ no_move_punishment = 3.
 agent_neurons = 6
 neuron_pop_size = 1
 ex_in_ratio = 4#:1
-visual_discrete = 2
-visual_field = (2./6.)*np.pi
+visual_discrete = 4
+visual_field = (4./6.)*np.pi
 max_poisson = 50
 mutation_rate = 0.02
 shift_ratio = 0.2
-number_of_children = 80
+number_of_children = 300
 fitness_offset = 150
 #maybe gentically code this
 visual_weight = 4
@@ -81,6 +81,8 @@ random_light_location = True
 
 print "can I commit"
 
+currently_running = True
+average_runtime = 0.0023
 port_offset = 1
 number_of_runs = 2
 counter = 1
@@ -276,22 +278,22 @@ def stop_flow(label, sender):
 motor_spikes = [0 for i in range(4)]
 def receive_spikes(label, time, neuron_ids):
     for neuron_id in neuron_ids:
-        run_condition.acquire()
-        print "Received spike at time {} from {} - {}".format(time, label, neuron_id)
-        run_condition.release()
+        # run_condition.acquire()
+        # print "Received spike at time {} from {} - {}".format(time, label, neuron_id)
+        # run_condition.release()
         #add handler to process spike to motor command/ location change
         if label == neuron_labels[agent_neurons-4]:
             motor_spikes[0] += 1
-            print "motor 0"
+            print "motor 0 - ", time
         elif label == neuron_labels[agent_neurons-3]:
             motor_spikes[1] += 1
-            print "motor 1"
+            print "motor 1 - ", time
         elif label == neuron_labels[agent_neurons-2]:
             motor_spikes[2] += 1
-            print "motor 2"
+            print "motor 2 - ", time
         elif label == neuron_labels[agent_neurons-1]:
             motor_spikes[3] += 1
-            print "motor 3"
+            print "motor 3 - ", time
         else:
             print "failed motor receive"
 
@@ -413,14 +415,19 @@ def poisson_setting(label, connection):
     global current_light_theta
     global print_move
     global number_of_runs
-    float_time = float(time_slice-2)/1000
+    global currently_running
+    global average_runtime
+    float_time = float(time_slice-(average_runtime*1000))/1000
     temp_motors = [0 for i in range(4)]
-    # time_length = []
+    time_length = []
     for i in range(0,total_runtime,time_slice):
-        time.sleep(float_time)
-        # start = time.time()
+        if currently_running == True:
+            time.sleep(float_time)
+            start = time.clock()
+        mototal = 0
         for j in range(4):
             temp_motors[j] = motor_spikes[j]
+            mototal += motor_spikes[j]
         # update location
         update_location(current_agent)
         # calculate fitness
@@ -432,11 +439,12 @@ def poisson_setting(label, connection):
         # print label
         # print "\n"
         # set poisson rates
-        for j in range(visual_discrete):
-            print "managed ",j
-            #visual_input[j].set(rate=sensor_poisson[j])
-            connection.set_rates("input_spikes{}_control".format(j), [(0, int(sensor_poisson[j]))])
-            # connection.set_rates(label, [(0, int(sensor_poisson[j]))])
+        if currently_running == True and mototal:
+            for j in range(visual_discrete):
+                print "managed ",j
+                #visual_input[j].set(rate=sensor_poisson[j])
+                connection.set_rates("input_spikes{}_control".format(j), [(0, int(sensor_poisson[j]))])
+                # connection.set_rates(label, [(0, int(sensor_poisson[j]))])
         print "did a run {}/{}, time now at {}/{} and fitness = {}/{}".format\
             (counter, number_of_runs, i + time_slice, total_runtime, current_fitness, current_light_distance * ((i / time_slice) + 1))
         if print_move == True:
@@ -445,14 +453,18 @@ def poisson_setting(label, connection):
                 writer.writerow([agent_pop[current_agent][genetic_length - 3], agent_pop[current_agent][genetic_length - 2],
                                  agent_pop[current_agent][genetic_length - 1],
                                  temp_motors[0], temp_motors[1], temp_motors[2], temp_motors[3]])
-    #     finish = time.time()
-    #     time_length.append((finish-start))
-    #     print "\ntotal time for run = {}\n".format(finish - start)
-    # average = 0.0
-    # for i in range(len(time_length)):
-    #     average += time_length[i]
-    # average = average/i
-    # print "\naverage time for run = {}\n".format(average)
+        if currently_running == True:
+            finish = time.clock()
+            time_length.append((finish-start))
+            finished_run_at = i + time_slice
+            print "\ntotal time for run = {} <- {}-{}\n".format(finish - start, finish, start)
+    average = 0.0
+    # print "\n"
+    for i in range(len(time_length)):
+        # print time_length[i]
+        average += time_length[i]
+    average_runtime = average/i
+    print "\naverage time for run = {} and finished = {}\n".format(average_runtime, finished_run_at)
 
 
 
@@ -464,6 +476,7 @@ def agent_fitness(agent, light_distance, light_theta, print_move):
     global current_fitness
     global current_light_distance
     global current_light_theta
+    global currently_running
     current_agent = agent
     print "\n\nStarting agent - {}\n\n".format(agent)
     p.setup(timestep=1.0, min_delay=delay_min, max_delay=delay_max)
@@ -580,7 +593,9 @@ def agent_fitness(agent, light_distance, light_theta, print_move):
     current_fitness = 0
     current_light_theta = light_theta
     current_light_distance = light_distance
+    currently_running = True
     p.run(total_runtime)
+    currently_running = False
 
     no_move_distance = light_distance*total_runtime/time_slice
     fitness = current_fitness
