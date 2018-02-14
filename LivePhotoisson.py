@@ -20,12 +20,13 @@ time_slice = 100
 pop_size = 20
 reset_count = 10
 no_move_punishment = 3.
-agent_neurons = 6
+agent_neurons = 10 #forwards and backwards
 neuron_pop_size = 1
 ex_in_ratio = 4#:1
-visual_discrete = 4
+visual_discrete = 2
 visual_field = (4./6.)*np.pi
-max_poisson = 50
+max_poisson = 50 #with max_dist = 40 and forwards and backwards
+poisson_ratio = 0.5
 mutation_rate = 0.02
 shift_ratio = 0.2
 number_of_children = 300
@@ -299,8 +300,8 @@ def receive_spikes(label, time, neuron_ids):
 
 def update_location(agent):
     print "before = ", agent_pop[agent][genetic_length-3], agent_pop[agent][genetic_length-2], agent_pop[agent][genetic_length-1]
-    total_left = motor_spikes[0] #- motor_spikes[1]
-    total_right = motor_spikes[2] #- motor_spikes[3]
+    total_left = motor_spikes[0] - motor_spikes[1]
+    total_right = motor_spikes[2] - motor_spikes[3]
     motor_average = (total_right + total_left) / 2.
     if total_left != 0 or total_right != 0:
         left_ratio = np.abs(float(total_left)/(np.abs(float(total_left))+np.abs(float(total_right))))
@@ -354,7 +355,7 @@ def poisson_rate(agent, light_dist, light_angle):
     light_y = light_dist * np.cos(-light_angle)
     theta = my_tan(light_x-agent_x, light_y-agent_y)
     #calculate and cap distance
-    distance_cap = 200
+    distance_cap = 40
     distance = np.sqrt(np.power(agent_x-light_x,2)+np.power(agent_y-light_y,2))
     if distance < distance_cap:
         distance = distance_cap
@@ -386,10 +387,12 @@ def poisson_rate(agent, light_dist, light_angle):
                 left_angle += 2*np.pi
             min_angle = min(abs(left_angle), abs(right_angle))
             sensor_reading[i] = 1 - (min_angle/np.pi)
+        base_poisson = max_poisson * poisson_ratio
+        rest_poisson = max_poisson - base_poisson
         if distance > distance_cap:
-            sensor_poisson[i] = sensor_reading[i] * (np.power(distance_cap,2)/np.power(distance,2)) * max_poisson
+            sensor_poisson[i] = (sensor_reading[i] * (np.power(distance_cap,2)/np.power(distance,2)) * rest_poisson) + base_poisson
         else:
-            sensor_poisson[i] = sensor_reading[i] * max_poisson
+            sensor_poisson[i] = (sensor_reading[i] * rest_poisson) + base_poisson
 
     return sensor_poisson
 
@@ -465,8 +468,6 @@ def poisson_setting(label, connection):
         average += time_length[i]
     average_runtime = average/i
     print "\naverage time for run = {} and finished = {}\n".format(average_runtime, finished_run_at)
-
-
 
 def agent_fitness(agent, light_distance, light_theta, print_move):
     global port_offset
@@ -805,6 +806,7 @@ else:
         writer = csv.writer(file, delimiter=',', lineterminator='\n')
         writer.writerow(pop_fitness)
 #generate new pop based on fitness evaluations
+
 #sort fitness values
 order = bubble_sort_fitness(pop_fitness)
 worst_fitness = pop_fitness[order[pop_size-1]]
