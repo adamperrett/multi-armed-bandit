@@ -16,7 +16,7 @@ seed_population = False
 copy_population = False
 only_improve = False
 total_runtime = 10000
-time_slice = 100
+time_slice = 200
 pop_size = 20
 reset_count = 10
 no_move_punishment = 3.
@@ -481,7 +481,7 @@ def agent_fitness(agent, light_distance, light_theta, print_move):
     current_agent = agent
     print "\n\nStarting agent - {}\n\n".format(agent)
     p.setup(timestep=1.0, min_delay=delay_min, max_delay=delay_max)
-    p.set_number_of_neurons_per_core(p.IF_curr_exp, 20)
+    p.set_number_of_neurons_per_core(p.IF_cond_exp, 20)
     # setup of different neuronal populations
     #neuron_pop = list();
     neuron_pop = []
