@@ -75,7 +75,7 @@ lvl_stop_max = 10   #arbitrary atm
 lvl_noise_min = 0   #arbitrary atm
 lvl_noise_max = 10  #arbitrary atm
 neuron_params = 9
-neuron_pop = [[0 for i in range(neuron_params)] for i in range(neuron_pop_size)]
+neuron_pop = [[0 for i in range(neuron_params)] for j in range(neuron_pop_size)]
 for i in range(neuron_pop_size):
     #excititory probability
     neuron_pop[i][0] = np.random.uniform(excite_min,excite_max)
@@ -114,14 +114,14 @@ decay_max = 2
 strength_min = 0    #arbitrary atm
 strength_max = 15   #arbitrary atm
 chem_params = 3
-chem_pop = [[0 for i in range(chem_params)] for i in range(chem_pop_size)]
+chem_pop = [[0 for i in range(chem_params)] for j in range(chem_pop_size)]
 for i in range(chem_pop_size):
     #decay constant
     chem_pop[i][0] = np.random.uniform(decay_min,decay_max)
-    #chemical marker
-    chem_pop[i][1] = np.random.randint(0,np.power(2,marker_length))
     #stength/ initial concentration
-    chem_pop[i][2] = np.random.uniform(strength_min,strength_max)
+    chem_pop[i][1] = np.random.uniform(strength_min,strength_max)
+    #chemical marker
+    chem_pop[i][2] = np.random.randint(0,np.power(2,marker_length))
 
 
 #2D map orientation - maybe seperate for neurons and chemical
@@ -146,29 +146,52 @@ for i in range(chem_pop_size):
 #location of chemical pops = (x,y)
     #blending into neighbour amount = 0.4 (some random ratio)
 map_size = 4 #keeping fixed for now but in future could be adjustable by the GA
-per_cell_min = 20
-per_cell_max = 300
+per_cell_min = 50
+per_cell_max = 1000
 max_neuron_types = 5 #keeping fixed for now but in future could be adjustable by the GA
 max_chem_types = 5 #keeping fixed for now but in future could be adjustable by the GA
-map_params = 2 + (2*max_neuron_types) + (2*max_chem_types)
-map_pop = [[0 for i in range(map_params)] for i in range(map_pop_size)]
+map_neuron_params = 4
+map_chem_params = 3
+map_params = 4 + (map_neuron_params*max_neuron_types) + (map_chem_params*max_chem_types)
+map_pop = [[0 for i in range(map_params)] for j in range(map_pop_size)]
 for i in range(map_pop_size):
     #input location
-    map_pop[i][0] = np.random.randint(0,map_size) + (np.random.randint(0,map_size) * 10)
+    input_loc_x = 0
+    input_loc_y = 1
+    map_pop[i][input_loc_x] = np.random.randint(0,map_size)
+    map_pop[i][input_loc_y] = np.random.randint(0,map_size)
     #output location
-    map_pop[i][1] = np.random.randint(0,map_size) + (np.random.randint(0,map_size) * 10)
+    output_loc_x = 2
+    output_loc_y = 3
+    map_pop[i][output_loc_x] = np.random.randint(0,map_size)
+    map_pop[i][output_loc_y] = np.random.randint(0,map_size)
     #neurons to include
-    j = 0
-    while j < max_neuron_types:
-        map_pop[i][2+(j*2)] = np.random.randint(0,neuron_pop_size)
-        map_pop[i][3+(j*2)] = np.random.randint(0,map_size) + (np.random.randint(0,map_size) * 10)
-        j += 1
+    map_neuron_select = 4
+    map_neuron_loc_x = map_neuron_select + 1
+    map_neuron_loc_y = map_neuron_loc_x + 1
+    map_neuron_count = map_neuron_loc_y + 1
+    k = 0
+    while k < max_neuron_types:
+        #select the neuron pop
+        map_pop[i][map_neuron_select+(k*map_neuron_params)] = np.random.randint(0,neuron_pop_size)
+        #place the neuron pop in the map
+        map_pop[i][map_neuron_loc_x+(k*map_neuron_params)] = np.random.randint(0,map_size)
+        map_pop[i][map_neuron_loc_y+(k*map_neuron_params)] = np.random.randint(0,map_size)
+        #number of neurons at location
+        map_pop[i][map_neuron_count+(k*map_neuron_params)] = np.random.randint(per_cell_min,per_cell_max)
+        k += 1
     #chemicals to include
-    j = 0
-    while j < max_chem_types:
-        map_pop[i][2+(max_neuron_types*2)+(j*2)] = np.random.randint(0,chem_pop_size)
-        map_pop[i][3+(max_neuron_types*2)+(j*2)] = np.random.randint(0,map_size) + (np.random.randint(0,map_size) * 10)
-        j += 1
+    map_chem_select = map_neuron_select+(max_neuron_types*map_neuron_params)
+    map_chem_loc_x = map_chem_select + 1
+    map_chem_loc_y = map_chem_loc_x + 1
+    k = 0
+    while k < max_chem_types:
+        #select the chem pop
+        map_pop[i][map_chem_select+(k*map_chem_params)] = np.random.randint(0,chem_pop_size)
+        #place the chem pop
+        map_pop[i][map_chem_loc_x+(k*map_chem_params)] = np.random.randint(0,map_size)
+        map_pop[i][map_chem_loc_y+(k*map_chem_params)] = np.random.randint(0,map_size)
+        k += 1
 
 #test population (all combos of 3 evo properties, or pos not depends on construction)
     #many combinations of ball and beam starting point
@@ -177,7 +200,72 @@ for i in range(map_pop_size):
     #random test ordering to build robustness
     #average distance^2 from the centre assuming non random tests
 
-    #build whole chem map, average gradient in the x and y direction
+#return bit string of marker code to marker length bit code
+def marker_bits(marker_no):
+    bit_string = [0 for i in range(marker_length)]
+    bit_string[0] = marker_no%2
+    marker_no -= bit_string[0]
+    for i in range(1,marker_length):
+        #marker_no = marker_no - (np.power(2,(i-1))*bit_string[i-1])
+        bit_string[i] = marker_no % np.power(2,i+1)
+        if bit_string[i] != 0:
+            marker_no -= bit_string[i]
+            bit_string[i] = 1
+        else:
+            bit_string[i] = -1
+    return bit_string
+
+#build whole chem map, average gradient in the x and y direction
+def gradient_map(map_agent):
+    #first create a map of each chemicals concentrations throughout the map
+    concentration_chem_map = [[[0 for i in range(max_chem_types)] for j in range(map_size)] for k in range(map_size)]
+    for x in range(map_size):
+        for y in range(map_size):
+            for k in range(max_chem_types):
+                #calculate the concentration (base * e^(-d*lamda))
+                chem_select = (k*map_chem_params)
+                decay_const = chem_pop[map_pop[map_agent][map_chem_select+chem_select]][0]
+                base = chem_pop[map_pop[map_agent][map_chem_select+chem_select]][1]
+                distance = np.sqrt(np.power((x-map_pop[map_agent][map_chem_loc_x+chem_select]),2) + np.power((y-map_pop[map_agent][map_chem_loc_y+chem_select]),2))
+                concentration_chem_map[x][y][k] = base * np.exp(-1*decay_const*distance)
+    #map the combined markers concentration at each point in the map
+    marker_chem_map = [[[0 for i in range(marker_length)] for j in range(map_size)] for k in range(map_size)]
+    for k in range(max_chem_types):
+        chem_select = (k * map_chem_params)
+        bit_string = marker_bits(chem_pop[map_pop[map_agent][map_chem_select+chem_select]][2])
+        for x in range(map_size):
+            for y in range(map_size):
+                    for m in range(marker_length):
+                        marker_chem_map[x][y][m] += concentration_chem_map[x][y][k] * bit_string[m]
+    #calculate the gradient of each markers concentration in all 4 dimensions (maybe 6 later with 3d)
+    marker_gradient_map = [[[[0 for h in range(4)] for i in range(marker_length)] for j in range(map_size)] for k in range(map_size)]
+    left = 0
+    right = 1
+    bottom = 2
+    top = 3
+    gradient_sign = -1 #-1 -> +ve gradient = going up gradient
+    for x in range(map_size):
+        for y in range(map_size):
+            for m in range(marker_length):
+                centre = marker_chem_map[x][y][m]
+                if x > 0:
+                    marker_gradient_map[x][y][m][left] = (centre - marker_chem_map[x-1][y][m]) * gradient_sign
+                else:
+                    marker_gradient_map[x][y][m][left] = 0
+                if x < map_size-1:
+                    marker_gradient_map[x][y][m][right]= (centre - marker_chem_map[x+1][y][m]) * gradient_sign
+                else:
+                    marker_gradient_map[x][y][m][right] = 0
+                if y > 0:
+                    marker_gradient_map[x][y][m][bottom] = (centre - marker_chem_map[x][y-1][m]) * gradient_sign
+                else:
+                    marker_gradient_map[x][y][m][bottom] = 0
+                if y < map_size-1:
+                    marker_gradient_map[x][y][m][top] = (centre - marker_chem_map[x][y+1][m]) * gradient_sign
+                else:
+                    marker_gradient_map[x][y][m][top] = 0
+    return marker_gradient_map
+
 
     #x'' = (x'*theta' - g*sin(theta)) / (1 + moi_beam/(mass*radius^2))
     #theta'' = (torque - mass*g*cos(theta) - 2*mass*x*x'*theta') / (mass*x^2 + moi_ball + moi_beam)
