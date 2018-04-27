@@ -11,6 +11,13 @@ from pyNN.random import RandomDistribution as rand
 import csv
 import pandas
 
+#define GA characteristics
+number_of_generations = 20
+cycles_per_generation = 1
+neuron_per_cycle = 1
+chem_per_cycle = 1
+map_per_cycle = 1
+
 #define the network parameters
 neuron_pop_size = 10
 chem_pop_size = 10
@@ -24,6 +31,11 @@ mass = 0.01
 radius = 0.01
 moi_ball = 0.0000006
 moi_beam = 0.02
+
+left = 0
+right = 1
+down = 2
+up = 3
 
 #initialise population or possibly read in from text file
 
@@ -71,30 +83,39 @@ delay_mean_max = 30
 delay_stdev_min = 0
 delay_stdev_max = 10
 lvl_stop_min = 0    #arbitrary atm
-lvl_stop_max = 10   #arbitrary atm
+lvl_stop_max = 2   #arbitrary atm
 lvl_noise_min = 0   #arbitrary atm
 lvl_noise_max = 10  #arbitrary atm
 neuron_params = 9
 neuron_pop = [[0 for i in range(neuron_params)] for j in range(neuron_pop_size)]
 for i in range(neuron_pop_size):
     #excititory probability
-    neuron_pop[i][0] = np.random.uniform(excite_min,excite_max)
+    excite_index = 0
+    neuron_pop[i][excite_index] = np.random.uniform(excite_min,excite_max)
     #connection probability
-    neuron_pop[i][1] = np.random.uniform(connect_prob_min,connect_prob_max)
+    connect_prob_index = 1
+    neuron_pop[i][connect_prob_index] = np.random.uniform(connect_prob_min,connect_prob_max)
     #weight mean
-    neuron_pop[i][2] = np.random.uniform(weight_mean_min,weight_mean_max)
+    weight_mean_index = 2
+    neuron_pop[i][weight_mean_index] = np.random.uniform(weight_mean_min,weight_mean_max)
     #weight stdev
-    neuron_pop[i][3] = np.random.uniform(weight_stdev_min,weight_stdev_max)
+    weight_stdev_index = 3
+    neuron_pop[i][weight_stdev_index] = np.random.uniform(weight_stdev_min,weight_stdev_max)
     #delay mean
-    neuron_pop[i][4] = np.random.uniform(delay_mean_min,delay_mean_max)
+    delay_mean_index = 4
+    neuron_pop[i][delay_mean_index] = np.random.uniform(delay_mean_min,delay_mean_max)
     #delay stdev
-    neuron_pop[i][5] = np.random.uniform(delay_stdev_min,delay_stdev_max)
+    delay_stdev_index = 5
+    neuron_pop[i][delay_stdev_index] = np.random.uniform(delay_stdev_min,delay_stdev_max)
     #level at which it will stop
-    neuron_pop[i][6] = np.random.uniform(lvl_stop_min,lvl_stop_max)
+    lvl_stop_index = 6
+    neuron_pop[i][lvl_stop_index] = np.random.uniform(lvl_stop_min,lvl_stop_max)
     #noise of level detection
-    neuron_pop[i][7] = np.random.uniform(lvl_noise_min,lvl_noise_max)
+    lvl_noise_index = 7
+    neuron_pop[i][lvl_noise_index] = np.random.uniform(lvl_noise_min,lvl_noise_max)
     #chemical marker
-    neuron_pop[i][8] = np.random.randint(0,np.power(2,marker_length))
+    chem_marker_index = 8
+    neuron_pop[i][chem_marker_index] = np.random.randint(0,np.power(2,marker_length))
 
 
 #chemical gradients
@@ -158,22 +179,32 @@ for i in range(map_pop_size):
     #input location
     input_loc_x = 0
     input_loc_y = 1
+    input_pop_size = 2
+    input_noise = 3
+    input_stop = 4
+    input_marker = 5
     map_pop[i][input_loc_x] = np.random.randint(0,map_size)
     map_pop[i][input_loc_y] = np.random.randint(0,map_size)
+    map_pop[i][input_pop_size] = np.random.randint(per_cell_min,per_cell_max)
+    map_pop[i][input_noise] = np.random.uniform(lvl_noise_min,lvl_noise_max)
+    map_pop[i][input_stop] = np.random.uniform(lvl_stop_min,lvl_stop_max)
+    map_pop[i][input_marker] = np.random.randint(0,np.power(2,marker_length))
     #output location
-    output_loc_x = 2
-    output_loc_y = 3
+    output_loc_x = input_marker + 1
+    output_loc_y = output_loc_x + 1
+    output_pop_size = output_loc_y + 1
     map_pop[i][output_loc_x] = np.random.randint(0,map_size)
     map_pop[i][output_loc_y] = np.random.randint(0,map_size)
+    map_pop[i][output_pop_size] = np.random.randint(per_cell_min,per_cell_max)
     #neurons to include
-    map_neuron_select = 4
-    map_neuron_loc_x = map_neuron_select + 1
+    map_neuron_index = output_pop_size + 1
+    map_neuron_loc_x = map_neuron_index + 1
     map_neuron_loc_y = map_neuron_loc_x + 1
     map_neuron_count = map_neuron_loc_y + 1
     k = 0
     while k < max_neuron_types:
         #select the neuron pop
-        map_pop[i][map_neuron_select+(k*map_neuron_params)] = np.random.randint(0,neuron_pop_size)
+        map_pop[i][map_neuron_index+(k*map_neuron_params)] = np.random.randint(0,neuron_pop_size)
         #place the neuron pop in the map
         map_pop[i][map_neuron_loc_x+(k*map_neuron_params)] = np.random.randint(0,map_size)
         map_pop[i][map_neuron_loc_y+(k*map_neuron_params)] = np.random.randint(0,map_size)
@@ -181,24 +212,17 @@ for i in range(map_pop_size):
         map_pop[i][map_neuron_count+(k*map_neuron_params)] = np.random.randint(per_cell_min,per_cell_max)
         k += 1
     #chemicals to include
-    map_chem_select = map_neuron_select+(max_neuron_types*map_neuron_params)
-    map_chem_loc_x = map_chem_select + 1
+    map_chem_index = map_neuron_index+(max_neuron_types*map_neuron_params)
+    map_chem_loc_x = map_chem_index + 1
     map_chem_loc_y = map_chem_loc_x + 1
     k = 0
     while k < max_chem_types:
         #select the chem pop
-        map_pop[i][map_chem_select+(k*map_chem_params)] = np.random.randint(0,chem_pop_size)
+        map_pop[i][map_chem_index+(k*map_chem_params)] = np.random.randint(0,chem_pop_size)
         #place the chem pop
         map_pop[i][map_chem_loc_x+(k*map_chem_params)] = np.random.randint(0,map_size)
         map_pop[i][map_chem_loc_y+(k*map_chem_params)] = np.random.randint(0,map_size)
         k += 1
-
-#test population (all combos of 3 evo properties, or pos not depends on construction)
-    #many combinations of ball and beam starting point
-    #roll together if time is an issue
-    #random initial conditions?
-    #random test ordering to build robustness
-    #average distance^2 from the centre assuming non random tests
 
 #return bit string of marker code to marker length bit code
 def marker_bits(marker_no):
@@ -216,7 +240,7 @@ def marker_bits(marker_no):
     return bit_string
 
 #build whole chem map, average gradient in the x and y direction
-def gradient_map(map_agent):
+def gradient_creation(map_agent):
     #first create a map of each chemicals concentrations throughout the map
     concentration_chem_map = [[[0 for i in range(max_chem_types)] for j in range(map_size)] for k in range(map_size)]
     for x in range(map_size):
@@ -224,25 +248,21 @@ def gradient_map(map_agent):
             for k in range(max_chem_types):
                 #calculate the concentration (base * e^(-d*lamda))
                 chem_select = (k*map_chem_params)
-                decay_const = chem_pop[map_pop[map_agent][map_chem_select+chem_select]][0]
-                base = chem_pop[map_pop[map_agent][map_chem_select+chem_select]][1]
+                decay_const = chem_pop[map_pop[map_agent][map_chem_index+chem_select]][0]
+                base = chem_pop[map_pop[map_agent][map_chem_index+chem_select]][1]
                 distance = np.sqrt(np.power((x-map_pop[map_agent][map_chem_loc_x+chem_select]),2) + np.power((y-map_pop[map_agent][map_chem_loc_y+chem_select]),2))
                 concentration_chem_map[x][y][k] = base * np.exp(-1*decay_const*distance)
     #map the combined markers concentration at each point in the map
     marker_chem_map = [[[0 for i in range(marker_length)] for j in range(map_size)] for k in range(map_size)]
     for k in range(max_chem_types):
         chem_select = (k * map_chem_params)
-        bit_string = marker_bits(chem_pop[map_pop[map_agent][map_chem_select+chem_select]][2])
+        bit_string = marker_bits(chem_pop[map_pop[map_agent][map_chem_index+chem_select]][2])
         for x in range(map_size):
             for y in range(map_size):
                     for m in range(marker_length):
                         marker_chem_map[x][y][m] += concentration_chem_map[x][y][k] * bit_string[m]
     #calculate the gradient of each markers concentration in all 4 dimensions (maybe 6 later with 3d)
     marker_gradient_map = [[[[0 for h in range(4)] for i in range(marker_length)] for j in range(map_size)] for k in range(map_size)]
-    left = 0
-    right = 1
-    bottom = 2
-    top = 3
     gradient_sign = -1 #-1 -> +ve gradient = going up gradient
     for x in range(map_size):
         for y in range(map_size):
@@ -257,16 +277,140 @@ def gradient_map(map_agent):
                 else:
                     marker_gradient_map[x][y][m][right] = 0
                 if y > 0:
-                    marker_gradient_map[x][y][m][bottom] = (centre - marker_chem_map[x][y-1][m]) * gradient_sign
+                    marker_gradient_map[x][y][m][down] = (centre - marker_chem_map[x][y-1][m]) * gradient_sign
                 else:
-                    marker_gradient_map[x][y][m][bottom] = 0
+                    marker_gradient_map[x][y][m][down] = 0
                 if y < map_size-1:
-                    marker_gradient_map[x][y][m][top] = (centre - marker_chem_map[x][y+1][m]) * gradient_sign
+                    marker_gradient_map[x][y][m][up] = (centre - marker_chem_map[x][y+1][m]) * gradient_sign
                 else:
-                    marker_gradient_map[x][y][m][top] = 0
+                    marker_gradient_map[x][y][m][up] = 0
     return marker_gradient_map
 
+#rolls the probability and sees where a marker will be carried along the gradients
+def gradient_final_location(marker, gradient_map, noise, stop_lvl, x, y):
+    final_loc = [0 for i in range(2)]
+    force = stop_lvl + 1
+    while force > stop_lvl:
+        total_left = 0
+        total_right = 0
+        total_down = 0
+        total_up = 0
+        for m in range(marker_length):
+            total_left += marker[m] * gradient_map[x][y][m][left]
+            total_right += marker[m] * gradient_map[x][y][m][right]
+            total_down += marker[m] * gradient_map[x][y][m][down]
+            total_up += marker[m] * gradient_map[x][y][m][up]
+        total_left += np.random.uniform(0,noise)
+        total_right += np.random.uniform(0,noise)
+        total_down += np.random.uniform(0,noise)
+        total_up += np.random.uniform(0,noise)
+        lateral = total_right - total_left
+        vertical = total_down - total_up
+        if np.abs(lateral) > stop_lvl or np.abs(vertical) > stop_lvl:
+            if np.abs(lateral) > np.abs(vertical):
+                if lateral > 0:
+                    x += 1
+                    if x > map_size - 1:
+                        x -= 1
+                        force = -1
+                        break
+                else:
+                    x -= 1
+                    if x < 0:
+                        x += 1
+                        force = -1
+                        break
+            else:
+                if vertical > 0:
+                    y += 1
+                    if y > map_size - 1:
+                        y -= 1
+                        force = -1
+                        break
+                else:
+                    y -= 1
+                    if y < 0:
+                        y += 1
+                        force = -1
+                        break
+        else:
+            force = -1
+            break
+    final_loc[0] = x
+    final_loc[1] = y
+    return final_loc
 
+#function to generate connections of each neuron
+def neuron_connect_dist(agent, neuron, input):
+    if input == False:
+        n_selected = neuron * map_neuron_params
+        n_agent = map_pop[agent][map_neuron_index+n_selected]
+        n_x = map_pop[agent][map_neuron_loc_x+n_selected]
+        n_y = map_pop[agent][map_neuron_loc_y+n_selected]
+        n_number = map_pop[agent][map_neuron_count+n_selected]
+        n_noise = neuron_pop[n_agent][lvl_noise_index]
+        n_stop = neuron_pop[n_agent][lvl_stop_index]
+        n_marker = marker_bits(neuron_pop[n_agent][chem_marker_index])
+        gradient_map = gradient_creation(agent)
+        final_axon_locs = [[0 for i in range(2)] for j in range(n_number)]
+        for i in range(n_number):
+            final_loc = gradient_final_location(n_marker, gradient_map, n_noise, n_stop, n_x, n_y)
+            final_axon_locs[i][0] = final_loc[0]
+            final_axon_locs[i][1] = final_loc[1]
+    else:
+        n_x = map_pop[agent][input_loc_x]
+        n_y = map_pop[agent][input_loc_y]
+        n_number = map_pop[agent][input_pop_size]
+        n_noise = map_pop[agent][input_noise]
+        n_stop = map_pop[agent][input_stop]
+        n_marker = marker_bits(map_pop[agent][input_marker])
+        gradient_map = gradient_creation(agent)
+        final_axon_locs = [[0 for i in range(2)] for j in range(n_number)]
+        for i in range(n_number):
+            final_loc = gradient_final_location(n_marker, gradient_map, n_noise, n_stop, n_x, n_y)
+            final_axon_locs[i][0] = final_loc[0]
+            final_axon_locs[i][1] = final_loc[1]
+    return final_axon_locs
+
+
+#creates the neural network to be placed on SpiNNaker
+def create_spinn_net(agent):
+    p.setup(timestep=1.0, min_delay=0, max_delay=(delay_mean_max+(4*delay_stdev_max)))
+    p.set_number_of_neurons_per_core(p.IF_cond_exp, 500)
+    #initialise the populations
+    n_pop_labels = []
+    n_pop_list = []
+    n_pop_labels.append("Input_pop")
+    n_pop_list.append(p.Population( map_pop[agent][input_pop_size], p.IF_cond_exp(), label=n_pop_labels[0]))
+    for i in range(max_neuron_types):
+        n_selected = i * map_neuron_params
+        n_index = map_pop[agent][map_neuron_index + n_selected]
+        n_number = map_pop[agent][map_neuron_count + n_selected]
+        excite_prob = neuron_pop[n_index][excite_index]
+        for j in range(n_number):
+            if np.random.uniform(0,1) < excite_prob:
+                n_pop_labels.append()
+    #connect the populations
+    neuron_connect_dist(agent, i, False)
+
+#tests a particular agent on the required configuration of tests
+def ball_and_beam_tests(agent, combined, random, number_of_tests, duration):
+    if combined == False:
+        print 'not combined, reroll every time'
+    else:
+        create_spinn_net(agent)
+
+# test population (all combos of 3 evo properties, or pos not depends on construction)
+    # many combinations of ball and beam starting point
+    # roll together if time is an issue
+    # random initial conditions?
+    # random test ordering to build robustness
+    # average distance^2 from the centre assuming non random tests
+for gen in range(number_of_generations):
+    for agent in range(map_pop_size):
+        fitness = ball_and_beam_tests(agent, True, False, 8, 5)
+
+#Test the population
     #x'' = (x'*theta' - g*sin(theta)) / (1 + moi_beam/(mass*radius^2))
     #theta'' = (torque - mass*g*cos(theta) - 2*mass*x*x'*theta') / (mass*x^2 + moi_ball + moi_beam)
     #x is +ve if on the left side and -ve if on the right
