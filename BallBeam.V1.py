@@ -25,6 +25,11 @@ map_pop_size = 10
 input_poisson_min = 2
 input_poisson_max = 50
 marker_length = 7
+map_size = 4 #keeping fixed for now but in future could be adjustable by the GA
+per_cell_min = 50
+per_cell_max = 1000
+max_neuron_types = 7 #2 are in&output - keeping fixed for now but in future could be adjustable by the GA
+max_chem_types = 5 #keeping fixed for now but in future could be adjustable by the GA
 
 #define experimental paramters
 beam_length = 2 #centred half way
@@ -89,7 +94,7 @@ delay_stdev_max = 10
 lvl_stop_min = 0    #arbitrary atm
 lvl_stop_max = 2   #arbitrary atm
 lvl_noise_min = 0   #arbitrary atm
-lvl_noise_max = 10  #arbitrary atm
+lvl_noise_max = 5  #arbitrary atm
 neuron_params = 9
 neuron_pop = [[0 for i in range(neuron_params)] for j in range(neuron_pop_size)]
 for i in range(neuron_pop_size):
@@ -170,46 +175,22 @@ for i in range(chem_pop_size):
 #number of chemical populations = ?
 #location of chemical pops = (x,y)
     #blending into neighbour amount = 0.4 (some random ratio)
-map_size = 4 #keeping fixed for now but in future could be adjustable by the GA
-per_cell_min = 50
-per_cell_max = 1000
-max_neuron_types = 5 #keeping fixed for now but in future could be adjustable by the GA
-max_chem_types = 5 #keeping fixed for now but in future could be adjustable by the GA
-map_neuron_params = 14
+map_neuron_params = 4
 map_chem_params = 3
-map_params = 4 + (map_neuron_params*max_neuron_types) + (map_chem_params*max_chem_types)
+map_params = 2 + (map_neuron_params*max_neuron_types) + (map_chem_params*max_chem_types)
 map_pop = [[0 for i in range(map_params)] for j in range(map_pop_size)]
 for i in range(map_pop_size):
-    #input location
-    input_loc_x = 0
-    input_loc_y = 1
-    input_pop_size = 2
-    input_noise = 3
-    input_stop = 4
-    #input_marker = 5
-    input_poisson_low = 5
-    input_poisson_high = 6
-    input_marker = 7
-    map_pop[i][input_loc_x] = np.random.randint(0,map_size)
-    map_pop[i][input_loc_y] = np.random.randint(0,map_size)
-    map_pop[i][input_pop_size] = np.random.randint(per_cell_min,per_cell_max)
-    map_pop[i][input_noise] = np.random.uniform(lvl_noise_min,lvl_noise_max)
-    map_pop[i][input_stop] = np.random.uniform(lvl_stop_min,lvl_stop_max)
+    #input poisson characteristics
+    input_poisson_low = 0
+    input_poisson_high = 1
     map_pop[i][input_poisson_low] = np.random.uniform(input_poisson_min,input_poisson_max)
     map_pop[i][input_poisson_high] = np.random.uniform(input_poisson_min,input_poisson_max)
-    map_pop[i][input_marker] = np.random.randint(0,np.power(2,marker_length))
-    #output location
-    output_loc_x = input_marker + 1
-    output_loc_y = output_loc_x + 1
-    output_pop_size = output_loc_y + 1
-    map_pop[i][output_loc_x] = np.random.randint(0,map_size)
-    map_pop[i][output_loc_y] = np.random.randint(0,map_size)
-    map_pop[i][output_pop_size] = np.random.randint(per_cell_min,per_cell_max)
     #neurons to include
-    map_neuron_index = output_pop_size + 1
+    map_neuron_index = input_poisson_high + 1
     map_neuron_loc_x = map_neuron_index + 1
     map_neuron_loc_y = map_neuron_loc_x + 1
     map_neuron_count = map_neuron_loc_y + 1
+    #map_neuron_max_connect_prob = map_neuron_count + 1
     k = 0
     while k < max_neuron_types:
         #select the neuron pop
@@ -300,6 +281,7 @@ def gradient_creation(map_agent):
 def gradient_final_location(marker, gradient_map, noise, stop_lvl, x, y):
     final_loc = [0 for i in range(2)]
     force = stop_lvl + 1
+    i = 0
     while force > stop_lvl:
         total_left = 0
         total_right = 0
@@ -310,109 +292,95 @@ def gradient_final_location(marker, gradient_map, noise, stop_lvl, x, y):
             total_right += marker[m] * gradient_map[x][y][m][right]
             total_down += marker[m] * gradient_map[x][y][m][down]
             total_up += marker[m] * gradient_map[x][y][m][up]
-        total_left += np.random.uniform(0,noise)
-        total_right += np.random.uniform(0,noise)
-        total_down += np.random.uniform(0,noise)
-        total_up += np.random.uniform(0,noise)
+        total_left += np.random.uniform(-noise,noise)
+        total_right += np.random.uniform(-noise,noise)
+        total_down += np.random.uniform(-noise,noise)
+        total_up += np.random.uniform(-noise,noise)
         lateral = total_right - total_left
-        vertical = total_down - total_up
+        vertical = total_up - total_down
         if np.abs(lateral) > stop_lvl or np.abs(vertical) > stop_lvl:
             if np.abs(lateral) > np.abs(vertical):
                 if lateral > 0:
                     x += 1
                     if x > map_size - 1:
                         x -= 1
-                        force = -1
                         break
                 else:
                     x -= 1
                     if x < 0:
                         x += 1
-                        force = -1
                         break
             else:
                 if vertical > 0:
                     y += 1
                     if y > map_size - 1:
                         y -= 1
-                        force = -1
                         break
                 else:
                     y -= 1
                     if y < 0:
                         y += 1
-                        force = -1
                         break
         else:
-            force = -1
             break
+        i += 1
+    if i > 10:
+        print i
     final_loc[0] = x
     final_loc[1] = y
     return final_loc
 
 #function to generate connections of each neuron
-def neuron_connect_dist(agent, neuron, input):
-    if input == False:
-        n_selected = neuron * map_neuron_params
-        n_agent = map_pop[agent][map_neuron_index+n_selected]
-        n_x = map_pop[agent][map_neuron_loc_x+n_selected]
-        n_y = map_pop[agent][map_neuron_loc_y+n_selected]
-        n_number = map_pop[agent][map_neuron_count+n_selected]
-        n_noise = neuron_pop[n_agent][lvl_noise_index]
-        n_stop = neuron_pop[n_agent][lvl_stop_index]
-        n_marker = marker_bits(neuron_pop[n_agent][chem_marker_index])
-        gradient_map = gradient_creation(agent)
-        final_axon_locs = [[0 for i in range(2)] for j in range(n_number)]
-        for i in range(n_number):
-            final_loc = gradient_final_location(n_marker, gradient_map, n_noise, n_stop, n_x, n_y)
-            final_axon_locs[i][0] = final_loc[0]
-            final_axon_locs[i][1] = final_loc[1]
-    else:
-        n_x = map_pop[agent][input_loc_x]
-        n_y = map_pop[agent][input_loc_y]
-        n_number = map_pop[agent][input_pop_size]
-        n_noise = map_pop[agent][input_noise]
-        n_stop = map_pop[agent][input_stop]
-        n_marker = marker_bits(map_pop[agent][input_marker])
-        gradient_map = gradient_creation(agent)
-        final_axon_locs = [[0 for i in range(2)] for j in range(n_number)]
-        for i in range(n_number):
-            final_loc = gradient_final_location(n_marker, gradient_map, n_noise, n_stop, n_x, n_y)
-            final_axon_locs[i][0] = final_loc[0]
-            final_axon_locs[i][1] = final_loc[1]
+def neuron_connect_dist(agent, neuron):
+    n_selected = neuron * map_neuron_params
+    n_agent = map_pop[agent][map_neuron_index+n_selected]
+    n_x = map_pop[agent][map_neuron_loc_x+n_selected]
+    n_y = map_pop[agent][map_neuron_loc_y+n_selected]
+    n_number = map_pop[agent][map_neuron_count+n_selected]
+    n_noise = neuron_pop[n_agent][lvl_noise_index]
+    n_stop = neuron_pop[n_agent][lvl_stop_index]
+    n_marker = marker_bits(neuron_pop[n_agent][chem_marker_index])
+    max_connect_probability = neuron_pop[n_agent][connect_prob_index]
+    gradient_map = gradient_creation(agent)
+    final_axon_locs = [[0 for i in range(map_size)] for j in range(map_size)]
+    for i in range(n_number):
+        final_loc = gradient_final_location(n_marker, gradient_map, n_noise, n_stop, n_x, n_y)
+        final_axon_locs[final_loc[0]][final_loc[1]] += 1
+    for i in range(map_size):
+        for j in range(map_size):
+            final_axon_locs[i][j] = (final_axon_locs[i][j] / float(n_number)) * max_connect_probability
     return final_axon_locs
 
 
 #creates the neural network to be placed on SpiNNaker
 def create_spinn_net(agent):
     global port_offset
-    p.setup(timestep=1.0, min_delay=0, max_delay=(delay_mean_max+(4*delay_stdev_max)))
+    p.setup(timestep=1.0, min_delay=1, max_delay=(delay_mean_max+(4*delay_stdev_max)))
     p.set_number_of_neurons_per_core(p.IF_cond_exp, 500)
     #initialise the populations
     n_pop_labels = []
     n_pop_list = []
-    #initialise the input populations
-    list_index = 0
-    for i in range(map_pop[agent][input_pop_size]):
-        n_pop_labels.append("Input_pop{}".format(i))
-        n_pop_list.append(p.Population(1, p.SpikeSourcePoisson(rate=map_pop[agent][input_poisson_low]), label=n_pop_labels[i]))
-        p.external_devices.add_poisson_live_rate_control(n_pop_list[i], database_notify_port_num=16000 + port_offset)
-        list_index += 1
-    #n_pop_list.append(p.Population(map_pop[agent][input_pop_size], p.IF_cond_exp(), label=n_pop_labels[0]))
-    for i in range(max_neuron_types):
+    #initialise the populations
+    for i in range(max_neuron_types+2):
+        n_selected = i * map_neuron_params
+        n_index = map_pop[agent][map_neuron_index + n_selected]
+        n_number = map_pop[agent][map_neuron_count + n_selected]
+        #set up the input as a live spike source
+        if i == 0:
+            n_pop_labels.append("Input_pop{}".format(i))
+            n_pop_list.append(p.Population(n_number, p.SpikeSourcePoisson(rate=0), label=n_pop_labels[i]))
+            p.external_devices.add_poisson_live_rate_control(n_pop_list[i],database_notify_port_num=16000 + port_offset)
+        #set up all other populations
+        else:
+            n_pop_labels.append("neuron{}-index{}".format(i,n_index))
+            n_pop_list.append(p.Population(n_number, p.IF_cond_exp(), label=n_pop_labels[i]))
+    #connect the populations
+    for i in range(max_neuron_types+2):
         n_selected = i * map_neuron_params
         n_index = map_pop[agent][map_neuron_index + n_selected]
         n_number = map_pop[agent][map_neuron_count + n_selected]
         excite_prob = neuron_pop[n_index][excite_index]
-        for j in range(n_number):
-            if np.random.uniform(0,1) < excite_prob:
-                n_pop_labels.append("Ecitatory-neuron{}-index{}-which{}/{}-xy({},{})".format(i,n_index,j,n_number,0,0))
-                n_pop_list.append(p.Population(map_pop[agent][input_pop_size], p.IF_cond_exp(), label=n_pop_labels[0]))
-            else:
-                print 'sfs'
-            list_index += 1
-    #connect the populations
-    neuron_connect_dist(agent, i, False)
+        connection_prob_dist = neuron_connect_dist(agent, i)
 
 #tests a particular agent on the required configuration of tests
 def ball_and_beam_tests(agent, combined, random, number_of_tests, duration):
@@ -428,7 +396,7 @@ def ball_and_beam_tests(agent, combined, random, number_of_tests, duration):
     # random test ordering to build robustness
     # average distance^2 from the centre assuming non random tests
 
-neuron_connect_dist(2,2,False)
+neuron_connect_dist(2,2)
 
 for gen in range(number_of_generations):
     for agent in range(map_pop_size):
