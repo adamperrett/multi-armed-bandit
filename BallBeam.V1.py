@@ -282,7 +282,16 @@ def gradient_final_location(marker, gradient_map, noise, stop_lvl, x, y):
     final_loc = [0 for i in range(2)]
     force = stop_lvl + 1
     i = 0
+    x_minus1 = x
+    y_minus1 = y
+    x_minus2 = -10
+    y_minus2 = -10
     while force > stop_lvl:
+        if i != 0:
+            x_minus2 = x_minus1
+            y_minus2 = y_minus1
+            x_minus1 = x
+            y_minus1 = y
         total_left = 0
         total_right = 0
         total_down = 0
@@ -323,7 +332,18 @@ def gradient_final_location(marker, gradient_map, noise, stop_lvl, x, y):
                         break
         else:
             break
+        #check if it is constantly switching back and forth between locations
+        if x == x_minus2 and y == y_minus2:
+            #randomly choose one of the 2 locations
+            if np.random.uniform(0,1) > 0.5:
+                x = x_minus1
+            if np.random.uniform(0,1) > 0.5:
+                y = y_minus1
+            break
         i += 1
+        if i > 100:
+            if np.random.uniform(0, 1) > 0.9:
+                break
     if i > 10:
         print i
     final_loc[0] = x
@@ -361,7 +381,7 @@ def create_spinn_net(agent):
     n_pop_labels = []
     n_pop_list = []
     #initialise the populations
-    for i in range(max_neuron_types+2):
+    for i in range(max_neuron_types):
         n_selected = i * map_neuron_params
         n_index = map_pop[agent][map_neuron_index + n_selected]
         n_number = map_pop[agent][map_neuron_count + n_selected]
@@ -375,7 +395,7 @@ def create_spinn_net(agent):
             n_pop_labels.append("neuron{}-index{}".format(i,n_index))
             n_pop_list.append(p.Population(n_number, p.IF_cond_exp(), label=n_pop_labels[i]))
     #connect the populations
-    for i in range(max_neuron_types+2):
+    for i in range(max_neuron_types):
         n_selected = i * map_neuron_params
         n_index = map_pop[agent][map_neuron_index + n_selected]
         n_number = map_pop[agent][map_neuron_count + n_selected]
@@ -396,10 +416,9 @@ def ball_and_beam_tests(agent, combined, random, number_of_tests, duration):
     # random test ordering to build robustness
     # average distance^2 from the centre assuming non random tests
 
-neuron_connect_dist(2,2)
-
 for gen in range(number_of_generations):
     for agent in range(map_pop_size):
+        print 'starting agent {}'.format(agent)
         fitness = ball_and_beam_tests(agent, True, False, 8, 5)
 
 #Test the population
@@ -414,3 +433,5 @@ for gen in range(number_of_generations):
     #or keep a few of the best and evaluate them in combination
 
 #
+
+print 'DONE!!!'
