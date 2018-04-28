@@ -22,6 +22,8 @@ map_per_cycle = 1
 neuron_pop_size = 10
 chem_pop_size = 10
 map_pop_size = 10
+input_poisson_min = 2
+input_poisson_max = 50
 marker_length = 7
 
 #define experimental paramters
@@ -36,6 +38,8 @@ left = 0
 right = 1
 down = 2
 up = 3
+
+port_offset = 0
 
 #initialise population or possibly read in from text file
 
@@ -171,7 +175,7 @@ per_cell_min = 50
 per_cell_max = 1000
 max_neuron_types = 5 #keeping fixed for now but in future could be adjustable by the GA
 max_chem_types = 5 #keeping fixed for now but in future could be adjustable by the GA
-map_neuron_params = 4
+map_neuron_params = 14
 map_chem_params = 3
 map_params = 4 + (map_neuron_params*max_neuron_types) + (map_chem_params*max_chem_types)
 map_pop = [[0 for i in range(map_params)] for j in range(map_pop_size)]
@@ -182,12 +186,17 @@ for i in range(map_pop_size):
     input_pop_size = 2
     input_noise = 3
     input_stop = 4
-    input_marker = 5
+    #input_marker = 5
+    input_poisson_low = 5
+    input_poisson_high = 6
+    input_marker = 7
     map_pop[i][input_loc_x] = np.random.randint(0,map_size)
     map_pop[i][input_loc_y] = np.random.randint(0,map_size)
     map_pop[i][input_pop_size] = np.random.randint(per_cell_min,per_cell_max)
     map_pop[i][input_noise] = np.random.uniform(lvl_noise_min,lvl_noise_max)
     map_pop[i][input_stop] = np.random.uniform(lvl_stop_min,lvl_stop_max)
+    map_pop[i][input_poisson_low] = np.random.uniform(input_poisson_min,input_poisson_max)
+    map_pop[i][input_poisson_high] = np.random.uniform(input_poisson_min,input_poisson_max)
     map_pop[i][input_marker] = np.random.randint(0,np.power(2,marker_length))
     #output location
     output_loc_x = input_marker + 1
@@ -287,6 +296,7 @@ def gradient_creation(map_agent):
     return marker_gradient_map
 
 #rolls the probability and sees where a marker will be carried along the gradients
+    #add some check to stop going backwards?
 def gradient_final_location(marker, gradient_map, noise, stop_lvl, x, y):
     final_loc = [0 for i in range(2)]
     force = stop_lvl + 1
@@ -375,13 +385,20 @@ def neuron_connect_dist(agent, neuron, input):
 
 #creates the neural network to be placed on SpiNNaker
 def create_spinn_net(agent):
+    global port_offset
     p.setup(timestep=1.0, min_delay=0, max_delay=(delay_mean_max+(4*delay_stdev_max)))
     p.set_number_of_neurons_per_core(p.IF_cond_exp, 500)
     #initialise the populations
     n_pop_labels = []
     n_pop_list = []
-    n_pop_labels.append("Input_pop")
-    n_pop_list.append(p.Population( map_pop[agent][input_pop_size], p.IF_cond_exp(), label=n_pop_labels[0]))
+    #initialise the input populations
+    list_index = 0
+    for i in range(map_pop[agent][input_pop_size]):
+        n_pop_labels.append("Input_pop{}".format(i))
+        n_pop_list.append(p.Population(1, p.SpikeSourcePoisson(rate=map_pop[agent][input_poisson_low]), label=n_pop_labels[i]))
+        p.external_devices.add_poisson_live_rate_control(n_pop_list[i], database_notify_port_num=16000 + port_offset)
+        list_index += 1
+    #n_pop_list.append(p.Population(map_pop[agent][input_pop_size], p.IF_cond_exp(), label=n_pop_labels[0]))
     for i in range(max_neuron_types):
         n_selected = i * map_neuron_params
         n_index = map_pop[agent][map_neuron_index + n_selected]
@@ -389,7 +406,11 @@ def create_spinn_net(agent):
         excite_prob = neuron_pop[n_index][excite_index]
         for j in range(n_number):
             if np.random.uniform(0,1) < excite_prob:
-                n_pop_labels.append()
+                n_pop_labels.append("Ecitatory-neuron{}-index{}-which{}/{}-xy({},{})".format(i,n_index,j,n_number,0,0))
+                n_pop_list.append(p.Population(map_pop[agent][input_pop_size], p.IF_cond_exp(), label=n_pop_labels[0]))
+            else:
+                print 'sfs'
+            list_index += 1
     #connect the populations
     neuron_connect_dist(agent, i, False)
 
@@ -406,6 +427,9 @@ def ball_and_beam_tests(agent, combined, random, number_of_tests, duration):
     # random initial conditions?
     # random test ordering to build robustness
     # average distance^2 from the centre assuming non random tests
+
+neuron_connect_dist(2,2,False)
+
 for gen in range(number_of_generations):
     for agent in range(map_pop_size):
         fitness = ball_and_beam_tests(agent, True, False, 8, 5)
