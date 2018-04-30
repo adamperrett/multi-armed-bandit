@@ -42,8 +42,9 @@ max_chem_types = 5 #keeping fixed for now but in future could be adjustable by t
 
 #define experimental paramters
 number_of_tests = 8
-duration = 10 #seconds
-time_segments = 100 #ms
+duration = 5000 #ms
+time_segments = 200 #duration of a segment
+fitness_begin = 0 #segment when fitness calculations begin
 experimental_record = []
 beam_length = 2 #centred half way
 g = 9.81
@@ -59,7 +60,8 @@ current_position = 0
 starting_position_min = 0.1 #ratio of the length from the centre
 starting_position_max = 1
 starting_angle_max = 1
-varying = "position"
+varying = "position" #position, angle or both
+fitness_calculation = "linear" #linear or expontial
 
 left = 0
 right = 1
@@ -67,6 +69,7 @@ down = 2
 up = 3
 
 port_offset = 0
+average_runtime = 0.002
 
 #initialise population or possibly read in from text file
 
@@ -200,7 +203,7 @@ for i in range(chem_pop_size):
     #blending into neighbour amount = 0.4 (some random ratio)
 map_neuron_params = 4
 map_chem_params = 3
-map_params = 2 + (map_neuron_params*max_neuron_types) + (map_chem_params*max_chem_types)
+map_params = (2*no_input_pop) + (map_neuron_params*max_neuron_types) + (map_chem_params*max_chem_types)
 map_pop = [[0 for i in range(map_params)] for j in range(map_pop_size)]
 for i in range(map_pop_size):
     #input poisson characteristics
@@ -267,23 +270,33 @@ def poisson_setting(label, connection):
     global current_angle
     global current_position
     global current_agent
+    global average_runtime
     print 'adjusting variables now'
-    #detect & record the current state of the test
-    experimental_record.append([current_position, current_angle, time.clock()])
     #convert to poisson rate
-    min_poisson_angle = map_pop[current_agent][input_poisson_low]
-    max_poisson_angle = map_pop[current_agent][input_poisson_high]
-    min_poisson_dist = map_pop[current_agent][input_poisson_low+no_input_pop]
-    max_poisson_dist = map_pop[current_agent][input_poisson_high+no_input_pop]
-    current_ang_ratio = (current_angle + max_angle) / (max_angle * 2)
-    poisson_angle = min_poisson_angle + ((max_poisson_angle - min_poisson_angle) * current_ang_ratio)
-    current_pos_ratio = (current_position + beam_length) / (beam_length * 2)
-    poisson_position = min_poisson_dist + ((max_poisson_dist - min_poisson_dist) * current_pos_ratio)
-    #set poisson rate
-    n_number = map_pop[agent][map_neuron_count]
-    connection.set_rates(input_labels[0], [(i, poisson_angle) for i in range(n_number)])
-    n_number = map_pop[agent][map_neuron_count+map_neuron_params]
-    connection.set_rates(input_labels[1], [(i, poisson_position) for i in range(n_number)])
+    min_poisson_dist = map_pop[current_agent][input_poisson_low]
+    max_poisson_dist = map_pop[current_agent][input_poisson_high]
+    min_poisson_angle = map_pop[current_agent][input_poisson_low+no_input_pop]
+    max_poisson_angle = map_pop[current_agent][input_poisson_high+no_input_pop]
+    float_time = float(time_segments - (average_runtime * 1000)) / 1000
+    total = 0
+    #loop through for the duration of a run
+    for i in range(0, duration, time_segments):
+        experimental_record.append([current_position, current_angle, time.clock()])
+        time.sleep(float_time)
+        start = time.clock()
+        current_pos_ratio = (current_position + beam_length) / (beam_length * 2)
+        poisson_position = min_poisson_dist + ((max_poisson_dist - min_poisson_dist) * current_pos_ratio)
+        current_ang_ratio = (current_angle + max_angle) / (max_angle * 2)
+        poisson_angle = min_poisson_angle + ((max_poisson_angle - min_poisson_angle) * current_ang_ratio)
+        #set poisson rate
+        n_number = map_pop[agent][map_neuron_count]
+        connection.set_rates(input_labels[0], [(i, poisson_position) for i in range(n_number)])
+        n_number = map_pop[agent][map_neuron_count+map_neuron_params]
+        connection.set_rates(input_labels[1], [(i, poisson_angle) for i in range(n_number)])
+        finish = time.clock()
+        total += (finish - start)
+        print "elapsed time = {}, {} - {}".format(finish - start, finish, start)
+    print 'total = {}, average = {}'.format(total, total/len(experimental_record))
 
 #build whole chem map, average gradient in the x and y direction
 def gradient_creation(map_agent):
@@ -521,23 +534,32 @@ def seperate_test(agent, angle, distance):
         del experimental_record[0]
     p.run(duration)
     #disect experiemntal data
-    
+    experiment_length = len(experimental_record)
+    running_fitness = 0
+    for i in range(fitness_begin, experiment_length):
+        if fitness_calculation == "linear":
+            running_fitness -= abs(experimental_record[i][0])
+        else:
+            running_fitness -= np.power(experimental_record[i][0], 2)
+    running_fitness = running_fitness / (experiment_length-fitness_begin)
+    return running_fitness
 
 
 def seperate_the_tests(agent, random):
+    overall_fitness = 0
     if random == False:
         if varying == "position":
             segments = number_of_tests / 2
             distance_segment = (beam_length * (starting_position_max - starting_position_min)) / (segments - 1)
             for i in range(segments):
-                seperate_test(agent, 0, (beam_length * starting_position_max) - (distance_segment * i), duration)
+                overall_fitness += seperate_test(agent, 0, (beam_length*starting_position_max)-(distance_segment * i))
             for i in range(segments):
-                seperate_test(agent, 0, -(beam_length * starting_position_max) + (distance_segment * i), duration)
+                overall_fitness += seperate_test(agent, 0, -(beam_length*starting_position_max)+(distance_segment * i))
         elif varying == "angle":
             angle_segment = ((min_angle - max_angle) * starting_angle_max) / (number_of_tests - 1)
             first_postion = min_angle + ((min_angle - max_angle) * (1-starting_angle_max)) #wrong
             for i in range(number_of_tests):
-                seperate_test(agent, first_postion + (angle_segment * i), beam_length * starting_position_max, duration)
+                overall_fitness += seperate_test(agent, first_postion+(angle_segment*i), beam_length*starting_position_max)
         else:
             print 'trying to vary both'
 
