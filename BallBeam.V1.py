@@ -289,16 +289,12 @@ def poisson_setting(label, connection):
     max_poisson_angle = map_pop[current_agent][input_poisson_high+no_input_pop]
     float_time = float(time_segments - (average_runtime * 1000)) / 1000
     total = 0
+    experimental_record.append([current_position, current_ball_vlct,current_ball_acc,
+                                current_angle, current_beam_vlct, current_beam_acc, time.clock()])
     #loop through for the duration of a run
     for i in range(0, duration, time_segments):
-        experimental_record.append([current_position, current_ball_vlct,current_ball_acc,
-                                    current_angle, current_beam_vlct, current_beam_acc, time.clock()])
         time.sleep(float_time)
         start = time.clock()
-        current_pos_ratio = (current_position + beam_length) / (beam_length * 2)
-        poisson_position = min_poisson_dist + ((max_poisson_dist - min_poisson_dist) * current_pos_ratio)
-        current_ang_ratio = (current_angle + max_angle) / (max_angle * 2)
-        poisson_angle = min_poisson_angle + ((max_poisson_angle - min_poisson_angle) * current_ang_ratio)
         #translate motor commands into movement of the beam and the ball
             # x'' = (x'*theta' - g*sin(theta)) / (1 + moi_beam/(mass*radius^2))
             # theta'' = (torque - mass*g*cos(theta) - 2*mass*x*x'*theta') / (mass*x^2 + moi_ball + moi_beam)
@@ -320,11 +316,22 @@ def poisson_setting(label, connection):
         current_beam_acc = (torque - (mass*g*np.cos(current_angle)) -
                             (2*mass*current_position*current_ball_vlct*current_beam_vlct))
         current_beam_acc /= (mass*np.power(current_position,2)) + moi_ball + moi_beam
+        seconds_window = time_segments / 1000
+        current_ball_vlct = current_ball_acc * seconds_window
+        current_position = current_ball_vlct *seconds_window
+        current_beam_vlct = current_beam_acc * seconds_window
+        current_angle = current_beam_vlct * seconds_window
         #set poisson rate
+        current_pos_ratio = (current_position + beam_length) / (beam_length * 2)
+        poisson_position = min_poisson_dist + ((max_poisson_dist - min_poisson_dist) * current_pos_ratio)
+        current_ang_ratio = (current_angle + max_angle) / (max_angle * 2)
+        poisson_angle = min_poisson_angle + ((max_poisson_angle - min_poisson_angle) * current_ang_ratio)
         n_number = map_pop[agent][map_neuron_count]
         connection.set_rates(input_labels[0], [(i, poisson_position) for i in range(n_number)])
         n_number = map_pop[agent][map_neuron_count+map_neuron_params]
         connection.set_rates(input_labels[1], [(i, poisson_angle) for i in range(n_number)])
+        experimental_record.append([current_position, current_ball_vlct,current_ball_acc,
+                                    current_angle, current_beam_vlct, current_beam_acc, time.clock()])
         finish = time.clock()
         total += (finish - start)
         print "elapsed time = {}, {} - {}".format(finish - start, finish, start)
