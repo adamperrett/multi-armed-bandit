@@ -28,19 +28,38 @@ marker_length = 7
 map_size = 4 #keeping fixed for now but in future could be adjustable by the GA
 per_cell_min = 50
 per_cell_max = 1000
+#input comprised of:
+    #position of the ball
+    #angle of the beam
+        #velocity of the ball
+        #velocity of the beam
 no_input_pop = 2
 no_output_pop = 2
+input_labels = list()
 output_labels = list()
 max_neuron_types = 5 + no_input_pop + no_output_pop #keeping fixed for now but in future could be adjustable by the GA
 max_chem_types = 5 #keeping fixed for now but in future could be adjustable by the GA
 
 #define experimental paramters
+number_of_tests = 8
+duration = 10 #seconds
+time_segments = 100 #ms
+experimental_record = []
 beam_length = 2 #centred half way
 g = 9.81
 mass = 0.01
 radius = 0.01
 moi_ball = 0.0000006
 moi_beam = 0.02
+max_angle = np.pi/4
+min_angle = -max_angle
+current_agent = 0
+current_angle = 0
+current_position = 0
+starting_position_min = 0.1 #ratio of the length from the centre
+starting_position_max = 1
+starting_angle_max = 1
+varying = "position"
 
 left = 0
 right = 1
@@ -187,10 +206,11 @@ for i in range(map_pop_size):
     #input poisson characteristics
     input_poisson_low = 0
     input_poisson_high = 1
-    map_pop[i][input_poisson_low] = np.random.uniform(input_poisson_min,input_poisson_max)
-    map_pop[i][input_poisson_high] = np.random.uniform(input_poisson_min,input_poisson_max)
+    for j in range(no_input_pop):
+        map_pop[i][input_poisson_low + (j*no_input_pop)] = np.random.uniform(input_poisson_min, input_poisson_max)
+        map_pop[i][input_poisson_high + (j*no_input_pop)] = np.random.uniform(input_poisson_min, input_poisson_max)
     #neurons to include
-    map_neuron_index = input_poisson_high + 1
+    map_neuron_index = (input_poisson_high * no_input_pop) + 1
     map_neuron_loc_x = map_neuron_index + 1
     map_neuron_loc_y = map_neuron_loc_x + 1
     map_neuron_count = map_neuron_loc_y + 1
@@ -241,6 +261,29 @@ def receive_spikes(label, time, neuron_ids):
             if label == output_labels[i]:
                 motor_spikes[i] += 1
                 print "motor {} - time = {}".format(i, time)
+
+#adjusts the poisson inputs live during a run
+def poisson_setting(label, connection):
+    global current_angle
+    global current_position
+    global current_agent
+    print 'adjusting variables now'
+    #detect & record the current state of the test
+    experimental_record.append([current_position, current_angle, time.clock()])
+    #convert to poisson rate
+    min_poisson_angle = map_pop[current_agent][input_poisson_low]
+    max_poisson_angle = map_pop[current_agent][input_poisson_high]
+    min_poisson_dist = map_pop[current_agent][input_poisson_low+no_input_pop]
+    max_poisson_dist = map_pop[current_agent][input_poisson_high+no_input_pop]
+    current_ang_ratio = (current_angle + max_angle) / (max_angle * 2)
+    poisson_angle = min_poisson_angle + ((max_poisson_angle - min_poisson_angle) * current_ang_ratio)
+    current_pos_ratio = (current_position + beam_length) / (beam_length * 2)
+    poisson_position = min_poisson_dist + ((max_poisson_dist - min_poisson_dist) * current_pos_ratio)
+    #set poisson rate
+    n_number = map_pop[agent][map_neuron_count]
+    connection.set_rates(input_labels[0], [(i, poisson_angle) for i in range(n_number)])
+    n_number = map_pop[agent][map_neuron_count+map_neuron_params]
+    connection.set_rates(input_labels[1], [(i, poisson_position) for i in range(n_number)])
 
 #build whole chem map, average gradient in the x and y direction
 def gradient_creation(map_agent):
@@ -399,22 +442,24 @@ def create_spinn_net(agent):
     global port_offset
     p.setup(timestep=1.0, min_delay=1, max_delay=(delay_mean_max+(4*delay_stdev_max)))
     p.set_number_of_neurons_per_core(p.IF_cond_exp, 500)
-    #initialise the populations
+    #initialise the variable and reset if multiple run
     n_pop_labels = []
     n_pop_list = []
     n_proj_list = []
     if port_offset != 0:
         for i in range(no_output_pop):
             del output_labels[0]
+        for i in range(no_input_pop):
+            del input_labels[0]
     #initialise the populations
     for i in range(max_neuron_types):
         n_selected = i * map_neuron_params
         n_index = map_pop[agent][map_neuron_index + n_selected]
         n_number = map_pop[agent][map_neuron_count + n_selected]
         #set up the input as a live spike source
-            #possibly set up an input for both directions
         if i < no_input_pop:
             n_pop_labels.append("Input_pop{}/{}-index{}".format(i, i, n_index))
+            input_labels.append("Input_pop{}/{}-index{}".format(i, i, n_index))
             n_pop_list.append(p.Population(n_number, p.SpikeSourcePoisson(rate=0), label=n_pop_labels[i]))
             p.external_devices.add_poisson_live_rate_control(n_pop_list[i],database_notify_port_num=16000 + port_offset)
         #set up output pop
@@ -427,6 +472,9 @@ def create_spinn_net(agent):
         else:
             n_pop_labels.append("neuron{}-index{}".format(i,n_index))
             n_pop_list.append(p.Population(n_number, p.IF_cond_exp(), label=n_pop_labels[i]))
+    poisson_control = p.external_devices.SpynnakerPoissonControlConnection(poisson_labels=input_labels,
+                                                                           local_port=16000+port_offset)
+    poisson_control.add_start_callback(n_pop_list[0].label, poisson_setting)
     live_connection = p.external_devices.SpynnakerLiveSpikesConnection(
         receive_labels=[n_pop_labels[no_input_pop], n_pop_labels[no_input_pop+1]], local_port=(18000 + port_offset))
     # live_connection = p.external_devices.SpynnakerLiveSpikesConnection(
@@ -445,7 +493,7 @@ def create_spinn_net(agent):
         delay_sdtev = neuron_pop[n_index][delay_stdev_index]
         connection_list = neuron2neuron(agent, i)
         #moderate the connection probability based excite probability
-        for j in range(max_neuron_types):
+        for j in range(no_input_pop, max_neuron_types):
             if connection_list[j] != 0:
                 con_excite_prob = connection_list[j] * excite_prob
                 con_inhib_prob = connection_list[j] * (1 - excite_prob)
@@ -459,12 +507,47 @@ def create_spinn_net(agent):
                                                 p.FixedProbabilityConnector(con_inhib_prob),
                                                 synapse, receptor_type="inhibitory"))
 
+def seperate_test(agent, angle, distance):
+    global current_angle
+    global current_position
+    global current_agent
+    #reset and run
+    current_angle = angle
+    current_position = distance
+    current_agent = agent
+    p.reset()
+    list_length = len(experimental_record)
+    for i in range(list_length):
+        del experimental_record[0]
+    p.run(duration)
+    #disect experiemntal data
+    
+
+
+def seperate_the_tests(agent, random):
+    if random == False:
+        if varying == "position":
+            segments = number_of_tests / 2
+            distance_segment = (beam_length * (starting_position_max - starting_position_min)) / (segments - 1)
+            for i in range(segments):
+                seperate_test(agent, 0, (beam_length * starting_position_max) - (distance_segment * i), duration)
+            for i in range(segments):
+                seperate_test(agent, 0, -(beam_length * starting_position_max) + (distance_segment * i), duration)
+        elif varying == "angle":
+            angle_segment = ((min_angle - max_angle) * starting_angle_max) / (number_of_tests - 1)
+            first_postion = min_angle + ((min_angle - max_angle) * (1-starting_angle_max)) #wrong
+            for i in range(number_of_tests):
+                seperate_test(agent, first_postion + (angle_segment * i), beam_length * starting_position_max, duration)
+        else:
+            print 'trying to vary both'
+
 #tests a particular agent on the required configuration of tests
-def ball_and_beam_tests(agent, combined, random, number_of_tests, duration):
+def ball_and_beam_tests(agent, combined, random):
     if combined == False:
         print 'not combined, reroll every time'
     else:
         create_spinn_net(agent)
+        seperate_the_tests(agent, random)
 
 # test population (all combos of 3 evo properties, or pos not depends on construction)
     # many combinations of ball and beam starting point
@@ -476,7 +559,7 @@ def ball_and_beam_tests(agent, combined, random, number_of_tests, duration):
 for gen in range(number_of_generations):
     for agent in range(map_pop_size):
         print 'starting agent {}'.format(agent)
-        fitness = ball_and_beam_tests(agent, True, False, 8, 5)
+        fitness = ball_and_beam_tests(agent, True, False)
 
 #Test the population
     #x'' = (x'*theta' - g*sin(theta)) / (1 + moi_beam/(mass*radius^2))
