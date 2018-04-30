@@ -6,7 +6,7 @@ import numpy as np
 from threading import Condition
 import matplotlib.pyplot as plt
 from matplotlib import gridspec
-from pyNN.random import RandomDistribution as rand
+from pyNN.random import RandomDistribution# as rand
 #import spynnaker8.spynakker_plotting as splot
 import csv
 import pandas
@@ -28,7 +28,10 @@ marker_length = 7
 map_size = 4 #keeping fixed for now but in future could be adjustable by the GA
 per_cell_min = 50
 per_cell_max = 1000
-max_neuron_types = 7 #2 are in&output - keeping fixed for now but in future could be adjustable by the GA
+no_input_pop = 2
+no_output_pop = 2
+output_labels = list()
+max_neuron_types = 5 + no_input_pop + no_output_pop #keeping fixed for now but in future could be adjustable by the GA
 max_chem_types = 5 #keeping fixed for now but in future could be adjustable by the GA
 
 #define experimental paramters
@@ -91,6 +94,7 @@ delay_mean_min = 0
 delay_mean_max = 30
 delay_stdev_min = 0
 delay_stdev_max = 10
+delay_cap = delay_mean_max + (3*delay_stdev_max)
 lvl_stop_min = 0    #arbitrary atm
 lvl_stop_max = 2   #arbitrary atm
 lvl_noise_min = 0   #arbitrary atm
@@ -229,6 +233,15 @@ def marker_bits(marker_no):
             bit_string[i] = -1
     return bit_string
 
+#function to keep a record of each output pops firing
+motor_spikes = [0 for i in range(no_output_pop)]
+def receive_spikes(label, time, neuron_ids):
+    for neuron_id in neuron_ids:
+        for i in range(no_output_pop):
+            if label == output_labels[i]:
+                motor_spikes[i] += 1
+                print "motor {} - time = {}".format(i, time)
+
 #build whole chem map, average gradient in the x and y direction
 def gradient_creation(map_agent):
     #first create a map of each chemicals concentrations throughout the map
@@ -277,7 +290,6 @@ def gradient_creation(map_agent):
     return marker_gradient_map
 
 #rolls the probability and sees where a marker will be carried along the gradients
-    #add some check to stop going backwards?
 def gradient_final_location(marker, gradient_map, noise, stop_lvl, x, y):
     final_loc = [0 for i in range(2)]
     force = stop_lvl + 1
@@ -301,10 +313,10 @@ def gradient_final_location(marker, gradient_map, noise, stop_lvl, x, y):
             total_right += marker[m] * gradient_map[x][y][m][right]
             total_down += marker[m] * gradient_map[x][y][m][down]
             total_up += marker[m] * gradient_map[x][y][m][up]
-        total_left += np.random.uniform(-noise,noise)
-        total_right += np.random.uniform(-noise,noise)
-        total_down += np.random.uniform(-noise,noise)
-        total_up += np.random.uniform(-noise,noise)
+        total_left += np.random.normal(0,noise)
+        total_right += np.random.normal(0,noise)
+        total_down += np.random.normal(0,noise)
+        total_up += np.random.normal(0,noise)
         lateral = total_right - total_left
         vertical = total_up - total_down
         if np.abs(lateral) > stop_lvl or np.abs(vertical) > stop_lvl:
@@ -371,6 +383,16 @@ def neuron_connect_dist(agent, neuron):
             final_axon_locs[i][j] = (final_axon_locs[i][j] / float(n_number)) * max_connect_probability
     return final_axon_locs
 
+#function maps which neuron pop a neuron pop connects to
+def neuron2neuron(agent, neuron):
+    connect_dist = neuron_connect_dist(agent, neuron)
+    all_nxy = [[0 for i in range(2)] for j in range(max_neuron_types)]
+    a2b = [0 for i in range(max_neuron_types)]
+    for i in range(max_neuron_types):
+        all_nxy[i][0] = map_pop[agent][map_neuron_loc_x+(i*map_neuron_params)]
+        all_nxy[i][1] = map_pop[agent][map_neuron_loc_y+(i*map_neuron_params)]
+        a2b[i] = connect_dist[all_nxy[i][0]][all_nxy[i][1]]
+    return a2b
 
 #creates the neural network to be placed on SpiNNaker
 def create_spinn_net(agent):
@@ -380,27 +402,62 @@ def create_spinn_net(agent):
     #initialise the populations
     n_pop_labels = []
     n_pop_list = []
+    n_proj_list = []
+    if port_offset != 0:
+        for i in range(no_output_pop):
+            del output_labels[0]
     #initialise the populations
     for i in range(max_neuron_types):
         n_selected = i * map_neuron_params
         n_index = map_pop[agent][map_neuron_index + n_selected]
         n_number = map_pop[agent][map_neuron_count + n_selected]
         #set up the input as a live spike source
-        if i == 0:
-            n_pop_labels.append("Input_pop{}".format(i))
+            #possibly set up an input for both directions
+        if i < no_input_pop:
+            n_pop_labels.append("Input_pop{}/{}-index{}".format(i, i, n_index))
             n_pop_list.append(p.Population(n_number, p.SpikeSourcePoisson(rate=0), label=n_pop_labels[i]))
             p.external_devices.add_poisson_live_rate_control(n_pop_list[i],database_notify_port_num=16000 + port_offset)
+        #set up output pop
+        elif i < no_input_pop + no_output_pop:
+            n_pop_labels.append("Output_pop{}/{}-index{}".format(i-no_input_pop, i, n_index))
+            output_labels.append("Output_pop{}/{}-index{}".format(i-no_input_pop, i, n_index))
+            n_pop_list.append(p.Population(n_number, p.IF_cond_exp(), label=n_pop_labels[i]))
+            p.external_devices.activate_live_output_for(n_pop_list[i], database_notify_port_num=18000 + port_offset)
         #set up all other populations
         else:
             n_pop_labels.append("neuron{}-index{}".format(i,n_index))
             n_pop_list.append(p.Population(n_number, p.IF_cond_exp(), label=n_pop_labels[i]))
+    live_connection = p.external_devices.SpynnakerLiveSpikesConnection(
+        receive_labels=[n_pop_labels[no_input_pop], n_pop_labels[no_input_pop+1]], local_port=(18000 + port_offset))
+    # live_connection = p.external_devices.SpynnakerLiveSpikesConnection(
+    #     receive_labels=output_labels, local_port=(18000 + port_offset))
+    for i in range(no_output_pop):
+        live_connection.add_receive_callback(n_pop_labels[no_input_pop+i], receive_spikes)
     #connect the populations
     for i in range(max_neuron_types):
         n_selected = i * map_neuron_params
         n_index = map_pop[agent][map_neuron_index + n_selected]
         n_number = map_pop[agent][map_neuron_count + n_selected]
         excite_prob = neuron_pop[n_index][excite_index]
-        connection_prob_dist = neuron_connect_dist(agent, i)
+        weight_mu = neuron_pop[n_index][weight_mean_index]
+        weight_sdtev = neuron_pop[n_index][weight_stdev_index]
+        delay_mu = neuron_pop[n_index][delay_mean_index]
+        delay_sdtev = neuron_pop[n_index][delay_stdev_index]
+        connection_list = neuron2neuron(agent, i)
+        #moderate the connection probability based excite probability
+        for j in range(max_neuron_types):
+            if connection_list[j] != 0:
+                con_excite_prob = connection_list[j] * excite_prob
+                con_inhib_prob = connection_list[j] * (1 - excite_prob)
+                weights = RandomDistribution("normal_clipped", mu=weight_mu, sigma=weight_sdtev, low=0, high=np.inf)
+                delays = RandomDistribution("normal_clipped", mu=delay_mu, sigma=delay_sdtev, low=1, high=delay_cap)
+                synapse = p.StaticSynapse(weight=weights, delay=delays)
+                n_proj_list.append(p.Projection(n_pop_list[i], n_pop_list[j],
+                                                p.FixedProbabilityConnector(con_excite_prob),
+                                                synapse, receptor_type="excitatory"))
+                n_proj_list.append(p.Projection(n_pop_list[i], n_pop_list[j],
+                                                p.FixedProbabilityConnector(con_inhib_prob),
+                                                synapse, receptor_type="inhibitory"))
 
 #tests a particular agent on the required configuration of tests
 def ball_and_beam_tests(agent, combined, random, number_of_tests, duration):
