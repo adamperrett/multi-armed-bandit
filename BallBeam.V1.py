@@ -47,6 +47,7 @@ time_segments = 200 #duration of a segment
 fitness_begin = 0 #segment when fitness calculations begin
 experimental_record = []
 beam_length = 2 #centred half way
+off_the_beam = -np.inf #fitness punishment if it falls off the beam
 g = 9.81
 mass = 0.01
 radius = 0.01
@@ -57,8 +58,13 @@ min_angle = -max_angle
 current_agent = 0
 current_angle = 0
 current_position = 0
+current_beam_vlct= 0
+current_ball_vlct = 0
+current_beam_acc = 0
+current_ball_acc = 0
+spike_to_torque = 0.005
 starting_position_min = 0.1 #ratio of the length from the centre
-starting_position_max = 1
+starting_position_max = 0.8
 starting_angle_max = 1
 varying = "position" #position, angle or both
 fitness_calculation = "linear" #linear or expontial
@@ -268,7 +274,11 @@ def receive_spikes(label, time, neuron_ids):
 #adjusts the poisson inputs live during a run
 def poisson_setting(label, connection):
     global current_angle
+    global current_beam_vlct
+    global current_beam_acc
     global current_position
+    global current_ball_vlct
+    global current_ball_acc
     global current_agent
     global average_runtime
     print 'adjusting variables now'
@@ -281,13 +291,35 @@ def poisson_setting(label, connection):
     total = 0
     #loop through for the duration of a run
     for i in range(0, duration, time_segments):
-        experimental_record.append([current_position, current_angle, time.clock()])
+        experimental_record.append([current_position, current_ball_vlct,current_ball_acc,
+                                    current_angle, current_beam_vlct, current_beam_acc, time.clock()])
         time.sleep(float_time)
         start = time.clock()
         current_pos_ratio = (current_position + beam_length) / (beam_length * 2)
         poisson_position = min_poisson_dist + ((max_poisson_dist - min_poisson_dist) * current_pos_ratio)
         current_ang_ratio = (current_angle + max_angle) / (max_angle * 2)
         poisson_angle = min_poisson_angle + ((max_poisson_angle - min_poisson_angle) * current_ang_ratio)
+        #translate motor commands into movement of the beam and the ball
+            # x'' = (x'*theta' - g*sin(theta)) / (1 + moi_beam/(mass*radius^2))
+            # theta'' = (torque - mass*g*cos(theta) - 2*mass*x*x'*theta') / (mass*x^2 + moi_ball + moi_beam)
+            # x is +ve if on the left side and -ve if on the right
+            # theta +ve if clockwise -ve if anti-clock
+        clockwise = 0
+        anticlock = 0
+        for j in range(no_output_pop):
+            #clockwise rotation
+            if j < no_output_pop / 2:
+                clockwise += motor_spikes[j]
+            #anticlockwise
+            else:
+                anticlock += motor_spikes[j]
+        total_clock = clockwise - anticlock
+        torque = total_clock * spike_to_torque
+        current_ball_acc = (current_ball_vlct*current_beam_vlct) - (g*np.sin(current_angle))
+        current_ball_acc /= (1 + (moi_beam/(mass*np.power(radius,2))))
+        current_beam_acc = (torque - (mass*g*np.cos(current_angle)) -
+                            (2*mass*current_position*current_ball_vlct*current_beam_vlct))
+        current_beam_acc /= (mass*np.power(current_position,2)) + moi_ball + moi_beam
         #set poisson rate
         n_number = map_pop[agent][map_neuron_count]
         connection.set_rates(input_labels[0], [(i, poisson_position) for i in range(n_number)])
@@ -541,27 +573,47 @@ def seperate_test(agent, angle, distance):
             running_fitness -= abs(experimental_record[i][0])
         else:
             running_fitness -= np.power(experimental_record[i][0], 2)
-    running_fitness = running_fitness / (experiment_length-fitness_begin)
+        if abs(experimental_record[i][0]) > beam_length:
+            running_fitness -= off_the_beam
+            if off_the_beam > 10000000:
+                break
+    running_fitness /= (experiment_length-fitness_begin)
     return running_fitness
-
 
 def seperate_the_tests(agent, random):
     overall_fitness = 0
+    test_fitness = [0 for i in range(number_of_tests + 1)]
+    index = 0
     if random == False:
         if varying == "position":
             segments = number_of_tests / 2
             distance_segment = (beam_length * (starting_position_max - starting_position_min)) / (segments - 1)
             for i in range(segments):
-                overall_fitness += seperate_test(agent, 0, (beam_length*starting_position_max)-(distance_segment * i))
+                test_fitness[index] = seperate_test(agent, 0, (beam_length*starting_position_max)-(distance_segment * i))
+                overall_fitness += test_fitness[index]
+                index += 1
             for i in range(segments):
-                overall_fitness += seperate_test(agent, 0, -(beam_length*starting_position_max)+(distance_segment * i))
+                test_fitness[index] = seperate_test(agent, 0, -(beam_length*starting_position_max)+(distance_segment * i))
+                overall_fitness += test_fitness[index]
+                index += 1
         elif varying == "angle":
             angle_segment = ((min_angle - max_angle) * starting_angle_max) / (number_of_tests - 1)
             first_postion = min_angle + ((min_angle - max_angle) * (1-starting_angle_max)) #wrong
             for i in range(number_of_tests):
-                overall_fitness += seperate_test(agent, first_postion+(angle_segment*i), beam_length*starting_position_max)
+                test_fitness[i] = seperate_test(agent, first_postion+(angle_segment*i), beam_length*starting_position_max)
+                overall_fitness += test_fitness[i]
         else:
             print 'trying to vary both'
+    else:
+        for i in range(number_of_tests):
+            random_distance = np.random.uniform(starting_position_min, starting_position_max) * beam_length
+            if np.random.uniform(0,1) < 0.5:
+                random_distance *= -1
+            random_angle = np.random.uniform(min_angle, max_angle)
+            test_fitness[i] = seperate_test(agent, random_angle, random_distance)
+            overall_fitness += test_fitness[i]
+    test_fitness[number_of_tests] = overall_fitness
+    return test_fitness
 
 #tests a particular agent on the required configuration of tests
 def ball_and_beam_tests(agent, combined, random):
@@ -584,10 +636,6 @@ for gen in range(number_of_generations):
         fitness = ball_and_beam_tests(agent, True, False)
 
 #Test the population
-    #x'' = (x'*theta' - g*sin(theta)) / (1 + moi_beam/(mass*radius^2))
-    #theta'' = (torque - mass*g*cos(theta) - 2*mass*x*x'*theta') / (mass*x^2 + moi_ball + moi_beam)
-    #x is +ve if on the left side and -ve if on the right
-    #theta +ve if clockwise -ve if anti-clock
 
 
 #evolve on property keeping the others fixed
