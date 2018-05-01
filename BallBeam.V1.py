@@ -44,6 +44,7 @@ max_chem_types = 5 #keeping fixed for now but in future could be adjustable by t
 number_of_tests = 8
 duration = 5000 #ms
 time_segments = 200 #duration of a segment
+average_runtime = 0.1 #time it takes to complete the setting of poisson variables
 fitness_begin = 0 #segment when fitness calculations begin
 experimental_record = []
 beam_length = 2 #centred half way
@@ -75,7 +76,6 @@ down = 2
 up = 3
 
 port_offset = 0
-average_runtime = 0.002
 
 #initialise population or possibly read in from text file
 
@@ -319,11 +319,12 @@ def poisson_setting(label, connection):
         current_beam_acc = (torque - (mass*g*np.cos(current_angle)) -
                             (2*mass*current_position*current_ball_vlct*current_beam_vlct))
         current_beam_acc /= (mass*np.power(current_position,2)) + moi_ball + moi_beam
-        seconds_window = float(time_segments / 1000)
-        current_ball_vlct += current_ball_acc * seconds_window
-        current_position += current_ball_vlct *seconds_window
-        current_beam_vlct += current_beam_acc * seconds_window
-        current_angle += current_beam_vlct * seconds_window
+        seconds_window = float(time_segments / 1000.0)
+        current_ball_vlct += float(current_ball_acc * seconds_window)
+        current_position += float(current_ball_vlct *seconds_window)
+        current_beam_vlct += float(current_beam_acc * seconds_window)
+        current_angle += float(current_beam_vlct * seconds_window)
+        current_angle = max(min(current_angle, max_angle), min_angle)
         #set poisson rate
         current_pos_ratio = (current_position + beam_length) / (beam_length * 2)
         poisson_position = min_poisson_dist + ((max_poisson_dist - min_poisson_dist) * current_pos_ratio)
@@ -337,7 +338,7 @@ def poisson_setting(label, connection):
                                     current_angle, current_beam_vlct, current_beam_acc, time.clock()])
         finish = time.clock()
         total += (finish - start)
-        print "elapsed time = {}\t{} - {}".format(finish - start, finish, start)
+        print "elapsed time = {}\t{} - {}\tave_float = {}".format(finish - start, finish, start, float_time)
     print 'total = {}, average = {}'.format(total, total/len(experimental_record))
 
 #build whole chem map, average gradient in the x and y direction
