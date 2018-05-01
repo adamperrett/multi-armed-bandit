@@ -26,23 +26,23 @@ input_poisson_min = 2
 input_poisson_max = 50
 marker_length = 7
 map_size = 4 #keeping fixed for now but in future could be adjustable by the GA
-per_cell_min = 50
-per_cell_max = 1000
+per_cell_min = 100
+per_cell_max = 500
 #input comprised of:
     #position of the ball
     #angle of the beam
         #velocity of the ball
         #velocity of the beam
-no_input_pop = 2
-no_output_pop = 2
 input_labels = list()
 output_labels = list()
+no_input_pop = 2
+no_output_pop = 2
 max_neuron_types = 5 + no_input_pop + no_output_pop #keeping fixed for now but in future could be adjustable by the GA
 max_chem_types = 5 #keeping fixed for now but in future could be adjustable by the GA
 
 #define experimental paramters
-number_of_tests = 8
-duration = 5000 #ms
+number_of_tests = 2
+duration = 2000 #ms
 time_segments = 200 #duration of a segment
 average_runtime = 0.1 #time it takes to complete the setting of poisson variables
 fitness_begin = 0 #segment when fitness calculations begin
@@ -68,7 +68,8 @@ starting_position_min = 0.1 #ratio of the length from the centre
 starting_position_max = 0.8
 starting_angle_max = 1
 varying = "position" #position, angle or both
-fitness_calculation = "linear" #linear or expontial
+fitness_calculation = "linear" #"linear", "quadratic" or within boundary "time"
+fitness_boundary = 0.05 #where it has to be placed within to constitute controlled positioning
 
 left = 0
 right = 1
@@ -76,6 +77,7 @@ down = 2
 up = 3
 
 port_offset = 0
+live_connection = p.external_devices.SpynnakerLiveSpikesConnection(local_port=(1800 + port_offset))
 
 #initialise population or possibly read in from text file
 
@@ -282,7 +284,6 @@ def poisson_setting(label, connection):
     global current_agent
     global average_runtime
     global motor_spikes
-    print 'adjusting variables now'
     #convert to poisson rate
     min_poisson_dist = map_pop[current_agent][input_poisson_low]
     max_poisson_dist = map_pop[current_agent][input_poisson_high]
@@ -297,10 +298,14 @@ def poisson_setting(label, connection):
         time.sleep(float_time)
         start = time.clock()
         #translate motor commands into movement of the beam and the ball
-            # x'' = (x'*theta' - g*sin(theta)) / (1 + moi_beam/(mass*radius^2))
-            # theta'' = (torque - mass*g*cos(theta) - 2*mass*x*x'*theta') / (mass*x^2 + moi_ball + moi_beam)
+            # x'' = (x'*theta'^2 - g*sin(theta)) / (1 + moi_ball/(mass*radius^2))
+            # theta'' = (torque - mass*g*x*cos(theta) - 2*mass*x*x'*theta') / (mass*x^2 + moi_ball + moi_beam)
             # x is +ve if on the left side and -ve if on the right
             # theta +ve if clockwise -ve if anti-clock
+            #alternate equations
+            #(Ib + ms * rb^2) * thetab'' + (2 * ms * rb * rb' * thetab') + (ms * g * rb * costhetab) = torque
+            #thetab'' = (torque - (ms * g * rb * costhetab) - (2 * ms * rb * rb' * thetab')) / (Ib + ms * rb^2)
+            #tb'' = -5/7 * (g * sinthetab - rb * thetab^2)
         clockwise = 0
         anticlock = 0
         for j in range(no_output_pop):
@@ -313,11 +318,12 @@ def poisson_setting(label, connection):
                 anticlock += motor_spikes[j]
                 motor_spikes[j] = 0
         total_clock = clockwise - anticlock
-        torque = total_clock * spike_to_torque
-        current_ball_acc = (current_ball_vlct*current_beam_vlct) - (g*np.sin(current_angle))
-        current_ball_acc /= (1 + (moi_beam/(mass*np.power(radius,2))))
-        current_beam_acc = (torque - (mass*g*np.cos(current_angle)) -
+        torque = float(total_clock) * spike_to_torque
+        current_ball_acc = (current_ball_vlct*np.power(current_beam_vlct,2)) - (g*np.sin(current_angle))
+        current_ball_acc /= (1 + (moi_ball/(mass*np.power(radius,2))))
+        current_beam_acc = (torque - (mass*g*current_position*np.cos(current_angle)) -
                             (2*mass*current_position*current_ball_vlct*current_beam_vlct))
+        #current_beam_acc = torque
         current_beam_acc /= (mass*np.power(current_position,2)) + moi_ball + moi_beam
         seconds_window = float(time_segments / 1000.0)
         current_ball_vlct += float(current_ball_acc * seconds_window)
@@ -325,6 +331,7 @@ def poisson_setting(label, connection):
         current_beam_vlct += float(current_beam_acc * seconds_window)
         current_angle += float(current_beam_vlct * seconds_window)
         current_angle = max(min(current_angle, max_angle), min_angle)
+        print "clock = {}\tanti = {}\ttorque = {}\tpos = {}\tangle = {}".format(clockwise,anticlock,torque,current_position,current_angle)
         #set poisson rate
         current_pos_ratio = (current_position + beam_length) / (beam_length * 2)
         poisson_position = min_poisson_dist + ((max_poisson_dist - min_poisson_dist) * current_pos_ratio)
@@ -336,6 +343,9 @@ def poisson_setting(label, connection):
         connection.set_rates(input_labels[1], [(i, int(poisson_angle)) for i in range(n_number)])
         experimental_record.append([current_position, current_ball_vlct,current_ball_acc,
                                     current_angle, current_beam_vlct, current_beam_acc, time.clock()])
+        if abs(current_position) > beam_length:
+            #p.end()
+            break
         finish = time.clock()
         total += (finish - start)
         print "elapsed time = {}\t{} - {}\tave_float = {}".format(finish - start, finish, start, float_time)
@@ -496,8 +506,9 @@ def neuron2neuron(agent, neuron):
 #creates the neural network to be placed on SpiNNaker
 def create_spinn_net(agent):
     global port_offset
+    global live_connection
     p.setup(timestep=1.0, min_delay=1, max_delay=(delay_mean_max+(4*delay_stdev_max)))
-    p.set_number_of_neurons_per_core(p.IF_cond_exp, 500)
+    p.set_number_of_neurons_per_core(p.IF_cond_exp, 150)
     #initialise the variable and reset if multiple run
     n_pop_labels = []
     n_pop_list = []
@@ -508,10 +519,12 @@ def create_spinn_net(agent):
         for i in range(no_input_pop):
             del input_labels[0]
     #initialise the populations
+    total_n = 0
     for i in range(max_neuron_types):
         n_selected = i * map_neuron_params
         n_index = map_pop[agent][map_neuron_index + n_selected]
         n_number = map_pop[agent][map_neuron_count + n_selected]
+        total_n += n_number
         #set up the input as a live spike source
         if i < no_input_pop:
             n_pop_labels.append("Input_pop{}/{}-index{}".format(i, i, n_index))
@@ -535,13 +548,14 @@ def create_spinn_net(agent):
         receive_labels=[n_pop_labels[no_input_pop], n_pop_labels[no_input_pop+1]], local_port=(18000 + port_offset))
     # live_connection = p.external_devices.SpynnakerLiveSpikesConnection(
     #     receive_labels=output_labels, local_port=(18000 + port_offset))
+    print "all neurons in the network = ", total_n
     for i in range(no_output_pop):
         live_connection.add_receive_callback(n_pop_labels[no_input_pop+i], receive_spikes)
     #connect the populations
     for i in range(max_neuron_types):
         n_selected = i * map_neuron_params
         n_index = map_pop[agent][map_neuron_index + n_selected]
-        n_number = map_pop[agent][map_neuron_count + n_selected]
+        #n_number = map_pop[agent][map_neuron_count + n_selected]
         excite_prob = neuron_pop[n_index][excite_index]
         weight_mu = neuron_pop[n_index][weight_mean_index]
         weight_sdtev = neuron_pop[n_index][weight_stdev_index]
@@ -565,11 +579,19 @@ def create_spinn_net(agent):
 
 def seperate_test(agent, angle, distance):
     global current_angle
+    global current_beam_vlct
+    global current_beam_acc
     global current_position
+    global current_ball_vlct
+    global current_ball_acc
     global current_agent
     #reset and run
     current_angle = angle
+    current_beam_vlct = 0
+    current_beam_acc = 0
     current_position = distance
+    current_ball_vlct = 0
+    current_ball_acc = 0
     current_agent = agent
     p.reset()
     list_length = len(experimental_record)
@@ -582,13 +604,17 @@ def seperate_test(agent, angle, distance):
     for i in range(fitness_begin, experiment_length):
         if fitness_calculation == "linear":
             running_fitness -= abs(experimental_record[i][0])
-        else:
+        elif fitness_calculation == "quadratic":
             running_fitness -= np.power(experimental_record[i][0], 2)
+        else:
+            print "timed"
+            #calculate how long it took to stablise within a boundary
         if abs(experimental_record[i][0]) > beam_length:
-            running_fitness -= off_the_beam
-            if off_the_beam > 10000000:
+            running_fitness = i
+            if off_the_beam > 100000000:
                 break
-    running_fitness /= (experiment_length-fitness_begin)
+    if running_fitness < 0:
+        running_fitness /= float(experiment_length-fitness_begin)
     return running_fitness
 
 def seperate_the_tests(agent, random):
@@ -598,21 +624,27 @@ def seperate_the_tests(agent, random):
     if random == False:
         if varying == "position":
             segments = number_of_tests / 2
-            distance_segment = (beam_length * (starting_position_max - starting_position_min)) / (segments - 1)
+            if segments == 1:
+                distance_segment = 0
+            else:
+                distance_segment = (beam_length * (starting_position_max - starting_position_min)) / (segments - 1)
             for i in range(segments):
                 test_fitness[index] = seperate_test(agent, 0, (beam_length*starting_position_max)-(distance_segment * i))
-                overall_fitness += test_fitness[index]
+                if test_fitness[index] < 0:
+                    overall_fitness += test_fitness[index]
                 index += 1
             for i in range(segments):
                 test_fitness[index] = seperate_test(agent, 0, -(beam_length*starting_position_max)+(distance_segment * i))
-                overall_fitness += test_fitness[index]
+                if test_fitness[index] < 0:
+                    overall_fitness += test_fitness[index]
                 index += 1
         elif varying == "angle":
             angle_segment = ((min_angle - max_angle) * starting_angle_max) / (number_of_tests - 1)
             first_postion = min_angle + ((min_angle - max_angle) * (1-starting_angle_max)) #wrong
             for i in range(number_of_tests):
                 test_fitness[i] = seperate_test(agent, first_postion+(angle_segment*i), beam_length*starting_position_max)
-                overall_fitness += test_fitness[i]
+                if test_fitness[i] < 0:
+                    overall_fitness += test_fitness[i]
         else:
             print 'trying to vary both'
     else:
@@ -622,8 +654,12 @@ def seperate_the_tests(agent, random):
                 random_distance *= -1
             random_angle = np.random.uniform(min_angle, max_angle)
             test_fitness[i] = seperate_test(agent, random_angle, random_distance)
-            overall_fitness += test_fitness[i]
+            if test_fitness[i] < 0:
+                overall_fitness += test_fitness[i]
     test_fitness[number_of_tests] = overall_fitness
+    live_connection.close()
+    live_connection._handle_possible_rerun_state()
+    p.end()
     return test_fitness
 
 #tests a particular agent on the required configuration of tests
@@ -632,7 +668,8 @@ def ball_and_beam_tests(agent, combined, random):
         print 'not combined, reroll every time'
     else:
         create_spinn_net(agent)
-        seperate_the_tests(agent, random)
+        agent_data = seperate_the_tests(agent, random)
+    return agent_data
 
 # test population (all combos of 3 evo properties, or pos not depends on construction)
     # many combinations of ball and beam starting point
@@ -644,7 +681,10 @@ def ball_and_beam_tests(agent, combined, random):
 for gen in range(number_of_generations):
     for agent in range(map_pop_size):
         print 'starting agent {}'.format(agent)
+        fitnesses = []
         fitness = ball_and_beam_tests(agent, True, False)
+        port_offset += 1
+        fitnesses.append(fitness)
 
 #Test the population
 
