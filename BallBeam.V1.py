@@ -269,7 +269,7 @@ def receive_spikes(label, time, neuron_ids):
         for i in range(no_output_pop):
             if label == output_labels[i]:
                 motor_spikes[i] += 1
-                print "motor {} - time = {}".format(i, time)
+                #print "motor {} - time = {}".format(i, time)
 
 #adjusts the poisson inputs live during a run
 def poisson_setting(label, connection):
@@ -281,6 +281,7 @@ def poisson_setting(label, connection):
     global current_ball_acc
     global current_agent
     global average_runtime
+    global motor_spikes
     print 'adjusting variables now'
     #convert to poisson rate
     min_poisson_dist = map_pop[current_agent][input_poisson_low]
@@ -306,9 +307,11 @@ def poisson_setting(label, connection):
             #clockwise rotation
             if j < no_output_pop / 2:
                 clockwise += motor_spikes[j]
+                motor_spikes[j] = 0
             #anticlockwise
             else:
                 anticlock += motor_spikes[j]
+                motor_spikes[j] = 0
         total_clock = clockwise - anticlock
         torque = total_clock * spike_to_torque
         current_ball_acc = (current_ball_vlct*current_beam_vlct) - (g*np.sin(current_angle))
@@ -316,25 +319,25 @@ def poisson_setting(label, connection):
         current_beam_acc = (torque - (mass*g*np.cos(current_angle)) -
                             (2*mass*current_position*current_ball_vlct*current_beam_vlct))
         current_beam_acc /= (mass*np.power(current_position,2)) + moi_ball + moi_beam
-        seconds_window = time_segments / 1000
-        current_ball_vlct = current_ball_acc * seconds_window
-        current_position = current_ball_vlct *seconds_window
-        current_beam_vlct = current_beam_acc * seconds_window
-        current_angle = current_beam_vlct * seconds_window
+        seconds_window = float(time_segments / 1000)
+        current_ball_vlct += current_ball_acc * seconds_window
+        current_position += current_ball_vlct *seconds_window
+        current_beam_vlct += current_beam_acc * seconds_window
+        current_angle += current_beam_vlct * seconds_window
         #set poisson rate
         current_pos_ratio = (current_position + beam_length) / (beam_length * 2)
         poisson_position = min_poisson_dist + ((max_poisson_dist - min_poisson_dist) * current_pos_ratio)
         current_ang_ratio = (current_angle + max_angle) / (max_angle * 2)
         poisson_angle = min_poisson_angle + ((max_poisson_angle - min_poisson_angle) * current_ang_ratio)
         n_number = map_pop[agent][map_neuron_count]
-        connection.set_rates(input_labels[0], [(i, poisson_position) for i in range(n_number)])
+        connection.set_rates(input_labels[0], [(i, int(poisson_position)) for i in range(n_number)])
         n_number = map_pop[agent][map_neuron_count+map_neuron_params]
-        connection.set_rates(input_labels[1], [(i, poisson_angle) for i in range(n_number)])
+        connection.set_rates(input_labels[1], [(i, int(poisson_angle)) for i in range(n_number)])
         experimental_record.append([current_position, current_ball_vlct,current_ball_acc,
                                     current_angle, current_beam_vlct, current_beam_acc, time.clock()])
         finish = time.clock()
         total += (finish - start)
-        print "elapsed time = {}, {} - {}".format(finish - start, finish, start)
+        print "elapsed time = {}\t{} - {}".format(finish - start, finish, start)
     print 'total = {}, average = {}'.format(total, total/len(experimental_record))
 
 #build whole chem map, average gradient in the x and y direction
