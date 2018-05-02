@@ -3,6 +3,7 @@ from pyNN.utility.plotting import Figure, Panel
 import time
 import pylab
 import numpy as np
+import threading
 from threading import Condition
 import matplotlib.pyplot as plt
 from matplotlib import gridspec
@@ -22,12 +23,12 @@ map_per_cycle = 1
 neuron_pop_size = 10
 chem_pop_size = 10
 map_pop_size = 10
-input_poisson_min = 2
-input_poisson_max = 50
+input_poisson_min = 1
+input_poisson_max = 10
 marker_length = 7
 map_size = 4 #keeping fixed for now but in future could be adjustable by the GA
-per_cell_min = 100
-per_cell_max = 500
+per_cell_min = 50
+per_cell_max = 200
 #input comprised of:
     #position of the ball
     #angle of the beam
@@ -77,6 +78,7 @@ down = 2
 up = 3
 
 port_offset = 0
+running_status = False
 live_connection = p.external_devices.SpynnakerLiveSpikesConnection(local_port=(1800 + port_offset))
 
 #initialise population or possibly read in from text file
@@ -115,7 +117,7 @@ live_connection = p.external_devices.SpynnakerLiveSpikesConnection(local_port=(1
 excite_min = 0
 excite_max = 1
 connect_prob_min = 0
-connect_prob_max = 1
+connect_prob_max = 0.2
 weight_mean_min = 0
 weight_mean_max = 0.015
 weight_stdev_min = 0
@@ -291,8 +293,8 @@ def poisson_setting(label, connection):
     max_poisson_angle = map_pop[current_agent][input_poisson_high+no_input_pop]
     float_time = float(time_segments - (average_runtime * 1000)) / 1000
     total = 0
-    experimental_record.append([current_position, current_ball_vlct,current_ball_acc,
-                                current_angle, current_beam_vlct, current_beam_acc, time.clock()])
+    # experimental_record.append([current_position, current_ball_vlct,current_ball_acc,
+    #                             current_angle, current_beam_vlct, current_beam_acc, time.clock()])
     #loop through for the duration of a run
     for i in range(0, duration, time_segments):
         time.sleep(float_time)
@@ -350,6 +352,76 @@ def poisson_setting(label, connection):
         total += (finish - start)
         print "elapsed time = {}\t{} - {}\tave_float = {}".format(finish - start, finish, start, float_time)
     print 'total = {}, average = {}'.format(total, total/len(experimental_record))
+
+#adjusts the poisson inputs using timer threads during a run
+def poisson_threading(label, connection):
+    global current_angle
+    global current_beam_vlct
+    global current_beam_acc
+    global current_position
+    global current_ball_vlct
+    global current_ball_acc
+    global current_agent
+    global average_runtime
+    global motor_spikes
+    global experimental_record
+    start = time.clock()
+    #convert to poisson rate
+    min_poisson_dist = map_pop[current_agent][input_poisson_low]
+    max_poisson_dist = map_pop[current_agent][input_poisson_high]
+    min_poisson_angle = map_pop[current_agent][input_poisson_low+no_input_pop]
+    max_poisson_angle = map_pop[current_agent][input_poisson_high+no_input_pop]
+    float_time = float(time_segments) / 1000.0
+    #thread a new run and start this
+    # thread = threading.Timer(time_segments, poisson_threading(label, connection))
+    time.sleep(float_time)
+    thread = threading.Thread(target=poisson_threading(label, connection))
+    if abs(current_position) < beam_length and running_status == True:
+        thread.start()
+    else:
+        thread.cancel()
+    clockwise = 0
+    anticlock = 0
+    for j in range(no_output_pop):
+        #clockwise rotation
+        if j < no_output_pop / 2:
+            clockwise += motor_spikes[j]
+            motor_spikes[j] = 0
+        #anticlockwise
+        else:
+            anticlock += motor_spikes[j]
+            motor_spikes[j] = 0
+    total_clock = clockwise - anticlock
+    torque = float(total_clock) * spike_to_torque
+    current_ball_acc = (current_ball_vlct*np.power(current_beam_vlct,2)) - (g*np.sin(current_angle))
+    current_ball_acc /= (1 + (moi_ball/(mass*np.power(radius,2))))
+    current_beam_acc = (torque - (mass*g*current_position*np.cos(current_angle)) -
+                        (2*mass*current_position*current_ball_vlct*current_beam_vlct))
+    #current_beam_acc = torque
+    current_beam_acc /= (mass*np.power(current_position,2)) + moi_ball + moi_beam
+    seconds_window = float(time_segments / 1000.0)
+    current_ball_vlct += float(current_ball_acc * seconds_window)
+    current_position += float(current_ball_vlct *seconds_window)
+    current_beam_vlct += float(current_beam_acc * seconds_window)
+    current_angle += float(current_beam_vlct * seconds_window)
+    current_angle = max(min(current_angle, max_angle), min_angle)
+    print "clock = {}\tanti = {}\ttorque = {}\tpos = {}\tangle = {}".format(clockwise,anticlock,torque,current_position,current_angle)
+    #set poisson rate
+    current_pos_ratio = (current_position + beam_length) / (beam_length * 2)
+    poisson_position = min_poisson_dist + ((max_poisson_dist - min_poisson_dist) * current_pos_ratio)
+    current_ang_ratio = (current_angle + max_angle) / (max_angle * 2)
+    poisson_angle = min_poisson_angle + ((max_poisson_angle - min_poisson_angle) * current_ang_ratio)
+    n_number = map_pop[agent][map_neuron_count]
+    connection.set_rates(input_labels[0], [(i, int(poisson_position)) for i in range(n_number)])
+    n_number = map_pop[agent][map_neuron_count+map_neuron_params]
+    connection.set_rates(input_labels[1], [(i, int(poisson_angle)) for i in range(n_number)])
+    experimental_record.append([current_position, current_ball_vlct,current_ball_acc,
+                                current_angle, current_beam_vlct, current_beam_acc, time.clock()])
+    if abs(current_position) > beam_length or running_status == False:
+        thread.cancel()
+    finish = time.clock()
+    print "elapsed time = {}\t{} - {}\tave_float = {}".format(finish - start, finish, start, float_time)
+
 
 #build whole chem map, average gradient in the x and y direction
 def gradient_creation(map_agent):
@@ -508,7 +580,7 @@ def create_spinn_net(agent):
     global port_offset
     global live_connection
     p.setup(timestep=1.0, min_delay=1, max_delay=(delay_mean_max+(4*delay_stdev_max)))
-    p.set_number_of_neurons_per_core(p.IF_cond_exp, 150)
+    p.set_number_of_neurons_per_core(p.IF_cond_exp, 32)
     #initialise the variable and reset if multiple run
     n_pop_labels = []
     n_pop_list = []
@@ -536,7 +608,7 @@ def create_spinn_net(agent):
             n_pop_labels.append("Output_pop{}/{}-index{}".format(i-no_input_pop, i, n_index))
             output_labels.append("Output_pop{}/{}-index{}".format(i-no_input_pop, i, n_index))
             n_pop_list.append(p.Population(n_number, p.IF_cond_exp(), label=n_pop_labels[i]))
-            p.external_devices.activate_live_output_for(n_pop_list[i], database_notify_port_num=18000 + port_offset)
+            #p.external_devices.activate_live_output_for(n_pop_list[i], database_notify_port_num=18000 + port_offset)
         #set up all other populations
         else:
             n_pop_labels.append("neuron{}-index{}".format(i,n_index))
@@ -544,6 +616,7 @@ def create_spinn_net(agent):
     poisson_control = p.external_devices.SpynnakerPoissonControlConnection(poisson_labels=input_labels,
                                                                            local_port=16000+port_offset)
     poisson_control.add_start_callback(n_pop_list[0].label, poisson_setting)
+    # poisson_control.add_start_callback(n_pop_list[0].label, poisson_threading)
     live_connection = p.external_devices.SpynnakerLiveSpikesConnection(
         receive_labels=[n_pop_labels[no_input_pop], n_pop_labels[no_input_pop+1]], local_port=(18000 + port_offset))
     # live_connection = p.external_devices.SpynnakerLiveSpikesConnection(
@@ -585,6 +658,7 @@ def seperate_test(agent, angle, distance):
     global current_ball_vlct
     global current_ball_acc
     global current_agent
+    global running_status
     #reset and run
     current_angle = angle
     current_beam_vlct = 0
@@ -597,7 +671,11 @@ def seperate_test(agent, angle, distance):
     list_length = len(experimental_record)
     for i in range(list_length):
         del experimental_record[0]
+    experimental_record.append([current_position, current_ball_vlct,current_ball_acc,
+                                current_angle, current_beam_vlct, current_beam_acc, time.clock()])
+    running_status = True
     p.run(duration)
+    running_status = False
     #disect experiemntal data
     experiment_length = len(experimental_record)
     running_fitness = 0
