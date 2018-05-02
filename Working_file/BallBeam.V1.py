@@ -24,7 +24,8 @@ neuron_pop_size = 10
 chem_pop_size = 10
 map_pop_size = 10
 input_poisson_min = 1
-input_poisson_max = 10
+input_poisson_max = 50
+#held_input_pop_size = 5
 marker_length = 7
 map_size = 4 #keeping fixed for now but in future could be adjustable by the GA
 per_cell_min = 50
@@ -223,7 +224,7 @@ for i in range(map_pop_size):
         map_pop[i][input_poisson_low + (j*no_input_pop)] = np.random.uniform(input_poisson_min, input_poisson_max)
         map_pop[i][input_poisson_high + (j*no_input_pop)] = np.random.uniform(input_poisson_min, input_poisson_max)
     #neurons to include
-    map_neuron_index = (input_poisson_high * no_input_pop) + 1
+    map_neuron_index = (2 * no_input_pop)
     map_neuron_loc_x = map_neuron_index + 1
     map_neuron_loc_y = map_neuron_loc_x + 1
     map_neuron_count = map_neuron_loc_y + 1
@@ -339,6 +340,7 @@ def poisson_setting(label, connection):
         poisson_position = min_poisson_dist + ((max_poisson_dist - min_poisson_dist) * current_pos_ratio)
         current_ang_ratio = (current_angle + max_angle) / (max_angle * 2)
         poisson_angle = min_poisson_angle + ((max_poisson_angle - min_poisson_angle) * current_ang_ratio)
+        print "\tpoisson angle = {}\tposition = {}".format(poisson_angle, poisson_position)
         n_number = map_pop[agent][map_neuron_count]
         connection.set_rates(input_labels[0], [(i, int(poisson_position)) for i in range(n_number)])
         n_number = map_pop[agent][map_neuron_count+map_neuron_params]
@@ -601,18 +603,20 @@ def create_spinn_net(agent):
         if i < no_input_pop:
             n_pop_labels.append("Input_pop{}/{}-index{}".format(i, i, n_index))
             input_labels.append("Input_pop{}/{}-index{}".format(i, i, n_index))
-            n_pop_list.append(p.Population(n_number, p.SpikeSourcePoisson(rate=0), label=n_pop_labels[i]))
+            n_pop_list.append(p.Population(n_number, p.SpikeSourcePoisson(rate=input_poisson_min), label=n_pop_labels[i]))
             p.external_devices.add_poisson_live_rate_control(n_pop_list[i],database_notify_port_num=16000 + port_offset)
         #set up output pop
         elif i < no_input_pop + no_output_pop:
             n_pop_labels.append("Output_pop{}/{}-index{}".format(i-no_input_pop, i, n_index))
             output_labels.append("Output_pop{}/{}-index{}".format(i-no_input_pop, i, n_index))
             n_pop_list.append(p.Population(n_number, p.IF_cond_exp(), label=n_pop_labels[i]))
-            #p.external_devices.activate_live_output_for(n_pop_list[i], database_notify_port_num=18000 + port_offset)
+            p.external_devices.activate_live_output_for(n_pop_list[i], database_notify_port_num=18000 + port_offset)
         #set up all other populations
         else:
             n_pop_labels.append("neuron{}-index{}".format(i,n_index))
             n_pop_list.append(p.Population(n_number, p.IF_cond_exp(), label=n_pop_labels[i]))
+        # n_pop_list[i].record(["spikes"])
+    print "all neurons in the network = ", total_n
     poisson_control = p.external_devices.SpynnakerPoissonControlConnection(poisson_labels=input_labels,
                                                                            local_port=16000+port_offset)
     poisson_control.add_start_callback(n_pop_list[0].label, poisson_setting)
@@ -621,7 +625,6 @@ def create_spinn_net(agent):
         receive_labels=[n_pop_labels[no_input_pop], n_pop_labels[no_input_pop+1]], local_port=(18000 + port_offset))
     # live_connection = p.external_devices.SpynnakerLiveSpikesConnection(
     #     receive_labels=output_labels, local_port=(18000 + port_offset))
-    print "all neurons in the network = ", total_n
     for i in range(no_output_pop):
         live_connection.add_receive_callback(n_pop_labels[no_input_pop+i], receive_spikes)
     #connect the populations
@@ -761,6 +764,7 @@ for gen in range(number_of_generations):
         print 'starting agent {}'.format(agent)
         fitnesses = []
         fitness = ball_and_beam_tests(agent, True, False)
+        #held_input_pop_size += 10
         port_offset += 1
         fitnesses.append(fitness)
 
