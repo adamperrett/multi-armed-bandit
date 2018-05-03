@@ -1,6 +1,7 @@
 import spynnaker8 as p
 from pyNN.utility.plotting import Figure, Panel
 import time
+import copy
 import pylab
 import numpy as np
 import threading
@@ -22,14 +23,14 @@ map_per_cycle = 1
 #define the network parameters
 neuron_pop_size = 10
 chem_pop_size = 10
-map_pop_size = 10
+map_pop_size = 3
 input_poisson_min = 1
 input_poisson_max = 50
-#held_input_pop_size = 5
+held_input_pop_size = 10
 marker_length = 7
 map_size = 4 #keeping fixed for now but in future could be adjustable by the GA
-per_cell_min = 50
-per_cell_max = 200
+per_cell_min = 20
+per_cell_max = 500
 #input comprised of:
     #position of the ball
     #angle of the beam
@@ -424,7 +425,6 @@ def poisson_threading(label, connection):
     finish = time.clock()
     print "elapsed time = {}\t{} - {}\tave_float = {}".format(finish - start, finish, start, float_time)
 
-
 #build whole chem map, average gradient in the x and y direction
 def gradient_creation(map_agent):
     #first create a map of each chemicals concentrations throughout the map
@@ -601,6 +601,9 @@ def create_spinn_net(agent):
         total_n += n_number
         #set up the input as a live spike source
         if i < no_input_pop:
+            if held_input_pop_size != 0:
+                map_pop[agent][map_neuron_count + n_selected] = held_input_pop_size
+                n_number = map_pop[agent][map_neuron_count + n_selected]
             n_pop_labels.append("Input_pop{}/{}-index{}".format(i, i, n_index))
             input_labels.append("Input_pop{}/{}-index{}".format(i, i, n_index))
             n_pop_list.append(p.Population(n_number, p.SpikeSourcePoisson(rate=input_poisson_min), label=n_pop_labels[i]))
@@ -759,14 +762,67 @@ def ball_and_beam_tests(agent, combined, random):
     # random test ordering to build robustness
     # average distance^2 from the centre assuming non random tests
 
+#sort and return a ranking based on multiple criteria
+def bubble_sort(criteria_1, criteria_2, criteria_3):
+    length = len(criteria_1)
+    order = [i for i in range(length)]
+    for i in range(length):
+        for j in range(length - i - 1):
+            if criteria_1[order[j]] < criteria_1[order[j+1]]:
+                temp = order[j+1]
+                order[j+1] = order[j]
+                order[j] = temp
+            elif criteria_1[order[j]] == criteria_1[order[j+1]]:
+                if criteria_2[order[j]] < criteria_2[order[j+1]]:
+                    temp = order[j+1]
+                    order[j+1] = order[j]
+                    order[j] = temp
+                elif criteria_2[order[j]] == criteria_2[order[j+1]]:
+                    if criteria_3[order[j]] < criteria_3[order[j+1]]:
+                        temp = order[j+1]
+                        order[j+1] = order[j]
+                        order[j] = temp
+    return order
+
+#compute the fitnesses passed in and rank accordingly
+def rank_fitnesses(mutatable):
+    global fitnesses
+    if mutatable == "map":
+        number_of_successes = [number_of_tests for i in range(map_pop_size)]
+        total_fail_time = [0 for i in range(map_pop_size)]
+        total_fitness = [0 for i in range(map_pop_size)]
+        for i in range(map_pop_size):
+            total_fitness[i] = fitnesses[0][number_of_tests]
+            for j in range(number_of_tests):
+                if fitnesses[0][j] > 0:
+                    number_of_successes[i] -= 1
+                    total_fail_time[i] += fitnesses[0][j]
+            del fitnesses[0]
+        order = bubble_sort(number_of_successes, total_fail_time, total_fitness)
+    elif mutatable == "chem":
+        print "mutating chemical populations"
+    else:
+        print "mutating neural populations"
+
+#use the rankings to produce mates
+
 for gen in range(number_of_generations):
-    for agent in range(map_pop_size):
-        print 'starting agent {}'.format(agent)
-        fitnesses = []
-        fitness = ball_and_beam_tests(agent, True, False)
-        #held_input_pop_size += 10
-        port_offset += 1
-        fitnesses.append(fitness)
+    for cycle in range(cycles_per_generation):
+        for map_agent in range(map_per_cycle):
+            fitnesses = []
+            fitnesses1 = []
+            fitnesses2 = []
+            for agent in range(map_pop_size):
+                print 'starting agent {}'.format(agent)
+                #fitness = ball_and_beam_tests(agent, True, False)
+                fitness = [agent, np.random.randint(0,10), np.random.randint(3,9), np.random.randint(0,10), np.random.randint(3,9), np.random.randint(0,10), np.random.randint(3,9)]
+                copy_fitness = copy.deepcopy(fitness)
+                port_offset += 1
+                fitnesses.append(fitness[:])
+                fitnesses1.append(fitness)
+                fitnesses2.append(copy_fitness)
+            rank_fitnesses("map")
+
 
 #Test the population
 
