@@ -26,11 +26,11 @@ chem_pop_size = 10
 map_pop_size = 3
 input_poisson_min = 1
 input_poisson_max = 50
-held_input_pop_size = 10
+held_input_pop_size = 0
 marker_length = 7
 map_size = 4 #keeping fixed for now but in future could be adjustable by the GA
 per_cell_min = 20
-per_cell_max = 500
+per_cell_max = 50
 #input comprised of:
     #position of the ball
     #angle of the beam
@@ -333,6 +333,7 @@ def poisson_setting(label, connection):
         current_ball_vlct += float(current_ball_acc * seconds_window)
         current_position += float(current_ball_vlct *seconds_window)
         current_beam_vlct += float(current_beam_acc * seconds_window)
+        #check that the beam is not at the maximum angle
         current_angle += float(current_beam_vlct * seconds_window)
         current_angle = max(min(current_angle, max_angle), min_angle)
         print "clock = {}\tanti = {}\ttorque = {}\tpos = {}\tangle = {}".format(clockwise,anticlock,torque,current_position,current_angle)
@@ -356,74 +357,89 @@ def poisson_setting(label, connection):
         print "elapsed time = {}\t{} - {}\tave_float = {}".format(finish - start, finish, start, float_time)
     print 'total = {}, average = {}'.format(total, total/len(experimental_record))
 
+#the function which sets the poisson inputs for the threading case
+def threading_setting(connection, start):
+    new_start = time.clock()
+    if (new_start - start < float(duration) / 1000.0):
+        print "\nset the rate at ", new_start - start
+        global current_angle
+        global current_beam_vlct
+        global current_beam_acc
+        global current_position
+        global current_ball_vlct
+        global current_ball_acc
+        global current_agent
+        global average_runtime
+        global motor_spikes
+        global experimental_record
+        # convert to poisson rate
+        min_poisson_dist = map_pop[current_agent][input_poisson_low]
+        max_poisson_dist = map_pop[current_agent][input_poisson_high]
+        min_poisson_angle = map_pop[current_agent][input_poisson_low + no_input_pop]
+        max_poisson_angle = map_pop[current_agent][input_poisson_high + no_input_pop]
+        clockwise = 0
+        anticlock = 0
+        for j in range(no_output_pop):
+            # clockwise rotation
+            if j < no_output_pop / 2:
+                clockwise += motor_spikes[j]
+                motor_spikes[j] = 0
+            # anticlockwise
+            else:
+                anticlock += motor_spikes[j]
+                motor_spikes[j] = 0
+        total_clock = clockwise - anticlock
+        torque = float(total_clock) * spike_to_torque
+        current_ball_acc = (current_ball_vlct * np.power(current_beam_vlct, 2)) - (g * np.sin(current_angle))
+        current_ball_acc /= (1 + (moi_ball / (mass * np.power(radius, 2))))
+        current_beam_acc = (torque - (mass * g * current_position * np.cos(current_angle)) -
+                            (2 * mass * current_position * current_ball_vlct * current_beam_vlct))
+        # current_beam_acc = torque
+        current_beam_acc /= (mass * np.power(current_position, 2)) + moi_ball + moi_beam
+        seconds_window = float(time_segments / 1000.0)
+        current_ball_vlct += float(current_ball_acc * seconds_window)
+        current_position += float(current_ball_vlct * seconds_window)
+        current_beam_vlct += float(current_beam_acc * seconds_window)
+        current_angle += float(current_beam_vlct * seconds_window)
+        current_angle = max(min(current_angle, max_angle), min_angle)
+        print "clock = {}\tanti = {}\ttorque = {}\tpos = {}\tangle = {}".format(clockwise, anticlock, torque,
+                                                                                current_position, current_angle)
+        # set poisson rate
+        current_pos_ratio = (current_position + beam_length) / (beam_length * 2)
+        poisson_position = min_poisson_dist + ((max_poisson_dist - min_poisson_dist) * current_pos_ratio)
+        current_ang_ratio = (current_angle + max_angle) / (max_angle * 2)
+        poisson_angle = min_poisson_angle + ((max_poisson_angle - min_poisson_angle) * current_ang_ratio)
+        n_number = map_pop[agent][map_neuron_count]
+        connection.set_rates(input_labels[0], [(i, int(poisson_position)) for i in range(n_number)])
+        n_number = map_pop[agent][map_neuron_count + map_neuron_params]
+        connection.set_rates(input_labels[1], [(i, int(poisson_angle)) for i in range(n_number)])
+        experimental_record.append([current_position, current_ball_vlct, current_ball_acc,
+                                    current_angle, current_beam_vlct, current_beam_acc, time.clock()])
+        print "finished setting rate at {}, taking {}".format(time.clock() - start, time.clock() - new_start)
+
+#recursively call the setting function
+def poisson_thread_recursion(connection, start, wait, offset):
+    global current_position
+    print "entered 2 ", (wait - offset)
+    time.sleep(wait-offset)
+    t_1 = time.clock()
+    threading.Thread(threading_setting(connection, start)).start()
+    if t_1 - start < float(duration)/ 1000.0:# and abs(current_position) < beam_length:
+        t_2 = time.clock()
+        #print "start = {}\tt1 = {}\tt2 = {}\twait = {}\toffset = {}".format(start, t_1, t_2, wait, offset)
+        poisson_thread_recursion(connection, start, wait, t_2 - t_1)
+
+
 #adjusts the poisson inputs using timer threads during a run
 def poisson_threading(label, connection):
-    global current_angle
-    global current_beam_vlct
-    global current_beam_acc
-    global current_position
-    global current_ball_vlct
-    global current_ball_acc
-    global current_agent
-    global average_runtime
-    global motor_spikes
-    global experimental_record
+    print "entered"
     start = time.clock()
-    #convert to poisson rate
-    min_poisson_dist = map_pop[current_agent][input_poisson_low]
-    max_poisson_dist = map_pop[current_agent][input_poisson_high]
-    min_poisson_angle = map_pop[current_agent][input_poisson_low+no_input_pop]
-    max_poisson_angle = map_pop[current_agent][input_poisson_high+no_input_pop]
+    threading.Thread(threading_setting(connection, start)).start()
     float_time = float(time_segments) / 1000.0
-    #thread a new run and start this
-    # thread = threading.Timer(time_segments, poisson_threading(label, connection))
-    time.sleep(float_time)
-    thread = threading.Thread(target=poisson_threading(label, connection))
-    if abs(current_position) < beam_length and running_status == True:
-        thread.start()
-    else:
-        thread.cancel()
-    clockwise = 0
-    anticlock = 0
-    for j in range(no_output_pop):
-        #clockwise rotation
-        if j < no_output_pop / 2:
-            clockwise += motor_spikes[j]
-            motor_spikes[j] = 0
-        #anticlockwise
-        else:
-            anticlock += motor_spikes[j]
-            motor_spikes[j] = 0
-    total_clock = clockwise - anticlock
-    torque = float(total_clock) * spike_to_torque
-    current_ball_acc = (current_ball_vlct*np.power(current_beam_vlct,2)) - (g*np.sin(current_angle))
-    current_ball_acc /= (1 + (moi_ball/(mass*np.power(radius,2))))
-    current_beam_acc = (torque - (mass*g*current_position*np.cos(current_angle)) -
-                        (2*mass*current_position*current_ball_vlct*current_beam_vlct))
-    #current_beam_acc = torque
-    current_beam_acc /= (mass*np.power(current_position,2)) + moi_ball + moi_beam
-    seconds_window = float(time_segments / 1000.0)
-    current_ball_vlct += float(current_ball_acc * seconds_window)
-    current_position += float(current_ball_vlct *seconds_window)
-    current_beam_vlct += float(current_beam_acc * seconds_window)
-    current_angle += float(current_beam_vlct * seconds_window)
-    current_angle = max(min(current_angle, max_angle), min_angle)
-    print "clock = {}\tanti = {}\ttorque = {}\tpos = {}\tangle = {}".format(clockwise,anticlock,torque,current_position,current_angle)
-    #set poisson rate
-    current_pos_ratio = (current_position + beam_length) / (beam_length * 2)
-    poisson_position = min_poisson_dist + ((max_poisson_dist - min_poisson_dist) * current_pos_ratio)
-    current_ang_ratio = (current_angle + max_angle) / (max_angle * 2)
-    poisson_angle = min_poisson_angle + ((max_poisson_angle - min_poisson_angle) * current_ang_ratio)
-    n_number = map_pop[agent][map_neuron_count]
-    connection.set_rates(input_labels[0], [(i, int(poisson_position)) for i in range(n_number)])
-    n_number = map_pop[agent][map_neuron_count+map_neuron_params]
-    connection.set_rates(input_labels[1], [(i, int(poisson_angle)) for i in range(n_number)])
-    experimental_record.append([current_position, current_ball_vlct,current_ball_acc,
-                                current_angle, current_beam_vlct, current_beam_acc, time.clock()])
-    if abs(current_position) > beam_length or running_status == False:
-        thread.cancel()
+    t_2 = time.clock()
+    poisson_thread_recursion(connection, start, float_time, t_2 - start)
     finish = time.clock()
-    print "elapsed time = {}\t{} - {}\tave_float = {}".format(finish - start, finish, start, float_time)
+    print "\nelapsed time = {}\t{} - {}".format(finish - start, finish, start)
 
 #build whole chem map, average gradient in the x and y direction
 def gradient_creation(map_agent):
@@ -622,8 +638,8 @@ def create_spinn_net(agent):
     print "all neurons in the network = ", total_n
     poisson_control = p.external_devices.SpynnakerPoissonControlConnection(poisson_labels=input_labels,
                                                                            local_port=16000+port_offset)
-    poisson_control.add_start_callback(n_pop_list[0].label, poisson_setting)
-    # poisson_control.add_start_callback(n_pop_list[0].label, poisson_threading)
+    # poisson_control.add_start_callback(n_pop_list[0].label, poisson_setting)
+    poisson_control.add_start_callback(n_pop_list[0].label, poisson_threading)
     live_connection = p.external_devices.SpynnakerLiveSpikesConnection(
         receive_labels=[n_pop_labels[no_input_pop], n_pop_labels[no_input_pop+1]], local_port=(18000 + port_offset))
     # live_connection = p.external_devices.SpynnakerLiveSpikesConnection(
@@ -814,8 +830,8 @@ for gen in range(number_of_generations):
             fitnesses2 = []
             for agent in range(map_pop_size):
                 print 'starting agent {}'.format(agent)
-                #fitness = ball_and_beam_tests(agent, True, False)
-                fitness = [agent, np.random.randint(0,10), np.random.randint(3,9), np.random.randint(0,10), np.random.randint(3,9), np.random.randint(0,10), np.random.randint(3,9)]
+                fitness = ball_and_beam_tests(agent, True, False)
+                #fitness = [agent, np.random.randint(0,10), np.random.randint(3,9), np.random.randint(0,10), np.random.randint(3,9), np.random.randint(0,10), np.random.randint(3,9)]
                 copy_fitness = copy.deepcopy(fitness)
                 port_offset += 1
                 fitnesses.append(fitness[:])
