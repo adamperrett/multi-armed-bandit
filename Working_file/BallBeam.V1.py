@@ -18,14 +18,15 @@ number_of_generations = 20
 cycles_per_generation = 1
 neuron_per_cycle = 1
 chem_per_cycle = 1
-map_per_cycle = 1
+map_per_cycle = 5
 
 #define the network parameters
-neuron_pop_size = 10
-chem_pop_size = 10
-map_pop_size = 3
+neuron_pop_size = 100
+chem_pop_size = 100
+map_pop_size = 10
 input_poisson_min = 1
 input_poisson_max = 50
+thread_input = False
 held_input_pop_size = 0
 marker_length = 7
 map_size = 4 #keeping fixed for now but in future could be adjustable by the GA
@@ -124,10 +125,10 @@ weight_mean_min = 0
 weight_mean_max = 0.015
 weight_stdev_min = 0
 weight_stdev_max = 0.005
-delay_mean_min = 0
-delay_mean_max = 30
+delay_mean_min = 2
+delay_mean_max = 40
 delay_stdev_min = 0
-delay_stdev_max = 10
+delay_stdev_max = 5
 delay_cap = delay_mean_max + (3*delay_stdev_max)
 lvl_stop_min = 0    #arbitrary atm
 lvl_stop_max = 2   #arbitrary atm
@@ -275,7 +276,7 @@ def receive_spikes(label, time, neuron_ids):
         for i in range(no_output_pop):
             if label == output_labels[i]:
                 motor_spikes[i] += 1
-                #print "motor {} - time = {}".format(i, time)
+                print "\n\nmotor {} - time = {}\n\n".format(i, time)
 
 #adjusts the poisson inputs live during a run
 def poisson_setting(label, connection):
@@ -298,9 +299,10 @@ def poisson_setting(label, connection):
     # experimental_record.append([current_position, current_ball_vlct,current_ball_acc,
     #                             current_angle, current_beam_vlct, current_beam_acc, time.clock()])
     #loop through for the duration of a run
+    start = time.clock()
     for i in range(0, duration, time_segments):
-        time.sleep(float_time)
-        start = time.clock()
+        #set at the precise time needed
+        time.sleep(max((float(i) / 1000.0) - (time.clock() - start), 0))
         #translate motor commands into movement of the beam and the ball
             # x'' = (x'*theta'^2 - g*sin(theta)) / (1 + moi_ball/(mass*radius^2))
             # theta'' = (torque - mass*g*x*cos(theta) - 2*mass*x*x'*theta') / (mass*x^2 + moi_ball + moi_beam)
@@ -338,12 +340,14 @@ def poisson_setting(label, connection):
         current_angle = max(min(current_angle, max_angle), min_angle)
         print "clock = {}\tanti = {}\ttorque = {}\tpos = {}\tangle = {}".format(clockwise,anticlock,torque,current_position,current_angle)
         #set poisson rate
-        current_pos_ratio = (current_position + beam_length) / (beam_length * 2)
+        current_pos_ratio = max(min((current_position + beam_length) / (beam_length * 2), 1), 0)
         poisson_position = min_poisson_dist + ((max_poisson_dist - min_poisson_dist) * current_pos_ratio)
         current_ang_ratio = (current_angle + max_angle) / (max_angle * 2)
         poisson_angle = min_poisson_angle + ((max_poisson_angle - min_poisson_angle) * current_ang_ratio)
         print "\tpoisson angle = {}\tposition = {}".format(poisson_angle, poisson_position)
         n_number = map_pop[agent][map_neuron_count]
+        #set at the precise time needed
+        # time.sleep(max((float(i) / 1000.0) - (time.clock() - start), 0))
         connection.set_rates(input_labels[0], [(i, int(poisson_position)) for i in range(n_number)])
         n_number = map_pop[agent][map_neuron_count+map_neuron_params]
         connection.set_rates(input_labels[1], [(i, int(poisson_angle)) for i in range(n_number)])
@@ -360,7 +364,7 @@ def poisson_setting(label, connection):
 #the function which sets the poisson inputs for the threading case
 def threading_setting(connection, start):
     new_start = time.clock()
-    if (new_start - start < float(duration) / 1000.0):
+    if new_start - start < float(duration) / 1000.0:
         print "\nset the rate at ", new_start - start
         global current_angle
         global current_beam_vlct
@@ -400,15 +404,20 @@ def threading_setting(connection, start):
         current_ball_vlct += float(current_ball_acc * seconds_window)
         current_position += float(current_ball_vlct * seconds_window)
         current_beam_vlct += float(current_beam_acc * seconds_window)
+        previous_angle = current_angle
         current_angle += float(current_beam_vlct * seconds_window)
         current_angle = max(min(current_angle, max_angle), min_angle)
+        if current_angle == previous_angle:
+            current_beam_acc = 0
+            current_beam_vlct = 0
         print "clock = {}\tanti = {}\ttorque = {}\tpos = {}\tangle = {}".format(clockwise, anticlock, torque,
                                                                                 current_position, current_angle)
         # set poisson rate
-        current_pos_ratio = (current_position + beam_length) / (beam_length * 2)
+        current_pos_ratio = max(min((current_position + beam_length) / (beam_length * 2), 1), 0)
         poisson_position = min_poisson_dist + ((max_poisson_dist - min_poisson_dist) * current_pos_ratio)
         current_ang_ratio = (current_angle + max_angle) / (max_angle * 2)
         poisson_angle = min_poisson_angle + ((max_poisson_angle - min_poisson_angle) * current_ang_ratio)
+        #print "setting @ {}\tpois ang = {}\tpois pos = {}".format(time.clock(), poisson_angle, poisson_position)
         n_number = map_pop[agent][map_neuron_count]
         connection.set_rates(input_labels[0], [(i, int(poisson_position)) for i in range(n_number)])
         n_number = map_pop[agent][map_neuron_count + map_neuron_params]
@@ -418,26 +427,18 @@ def threading_setting(connection, start):
         print "finished setting rate at {}, taking {}".format(time.clock() - start, time.clock() - new_start)
 
 #recursively call the setting function
-def poisson_thread_recursion(connection, start, wait, offset):
+def poisson_thread_recursion(connection, start, iteration):
     global current_position
-    print "entered 2 ", (wait - offset)
-    time.sleep(wait-offset)
-    t_1 = time.clock()
+    time.sleep(max((float(iteration)*(float(time_segments)/1000.0)) - (time.clock() - start), 0))
     threading.Thread(threading_setting(connection, start)).start()
-    if t_1 - start < float(duration)/ 1000.0:# and abs(current_position) < beam_length:
-        t_2 = time.clock()
-        #print "start = {}\tt1 = {}\tt2 = {}\twait = {}\toffset = {}".format(start, t_1, t_2, wait, offset)
-        poisson_thread_recursion(connection, start, wait, t_2 - t_1)
-
+    if time.clock() - start < float(duration) / 1000.0 and abs(current_position) < beam_length:
+        poisson_thread_recursion(connection, start, iteration + 1)
 
 #adjusts the poisson inputs using timer threads during a run
 def poisson_threading(label, connection):
-    print "entered"
     start = time.clock()
     threading.Thread(threading_setting(connection, start)).start()
-    float_time = float(time_segments) / 1000.0
-    t_2 = time.clock()
-    poisson_thread_recursion(connection, start, float_time, t_2 - start)
+    poisson_thread_recursion(connection, start, 1)
     finish = time.clock()
     print "\nelapsed time = {}\t{} - {}".format(finish - start, finish, start)
 
@@ -597,6 +598,8 @@ def neuron2neuron(agent, neuron):
 def create_spinn_net(agent):
     global port_offset
     global live_connection
+    global input_labels
+    global output_labels
     p.setup(timestep=1.0, min_delay=1, max_delay=(delay_mean_max+(4*delay_stdev_max)))
     p.set_number_of_neurons_per_core(p.IF_cond_exp, 32)
     #initialise the variable and reset if multiple run
@@ -638,8 +641,10 @@ def create_spinn_net(agent):
     print "all neurons in the network = ", total_n
     poisson_control = p.external_devices.SpynnakerPoissonControlConnection(poisson_labels=input_labels,
                                                                            local_port=16000+port_offset)
-    # poisson_control.add_start_callback(n_pop_list[0].label, poisson_setting)
-    poisson_control.add_start_callback(n_pop_list[0].label, poisson_threading)
+    if thread_input == False:
+        poisson_control.add_start_callback(n_pop_list[0].label, poisson_setting)
+    else:
+        poisson_control.add_start_callback(n_pop_list[0].label, poisson_threading)
     live_connection = p.external_devices.SpynnakerLiveSpikesConnection(
         receive_labels=[n_pop_labels[no_input_pop], n_pop_labels[no_input_pop+1]], local_port=(18000 + port_offset))
     # live_connection = p.external_devices.SpynnakerLiveSpikesConnection(
@@ -659,9 +664,10 @@ def create_spinn_net(agent):
         connection_list = neuron2neuron(agent, i)
         #moderate the connection probability based excite probability
         for j in range(no_input_pop, max_neuron_types):
-            if connection_list[j] != 0:
+            if connection_list[j] > 1e-6:
                 con_excite_prob = connection_list[j] * excite_prob
                 con_inhib_prob = connection_list[j] * (1 - excite_prob)
+                print "{}\t{}".format(con_excite_prob, con_inhib_prob)
                 weights = RandomDistribution("normal_clipped", mu=weight_mu, sigma=weight_sdtev, low=0, high=np.inf)
                 delays = RandomDistribution("normal_clipped", mu=delay_mu, sigma=delay_sdtev, low=1, high=delay_cap)
                 synapse = p.StaticSynapse(weight=weights, delay=delays)
@@ -672,7 +678,7 @@ def create_spinn_net(agent):
                                                 p.FixedProbabilityConnector(con_inhib_prob),
                                                 synapse, receptor_type="inhibitory"))
 
-def seperate_test(agent, angle, distance):
+def seperate_test(agent, angle, distance, continuous):
     global current_angle
     global current_beam_vlct
     global current_beam_acc
@@ -689,7 +695,10 @@ def seperate_test(agent, angle, distance):
     current_ball_vlct = 0
     current_ball_acc = 0
     current_agent = agent
-    p.reset()
+    if continuous == False:
+        p.reset()
+    for i in range(no_output_pop):
+        motor_spikes[i] = 0
     list_length = len(experimental_record)
     for i in range(list_length):
         del experimental_record[0]
@@ -717,7 +726,7 @@ def seperate_test(agent, angle, distance):
         running_fitness /= float(experiment_length-fitness_begin)
     return running_fitness
 
-def seperate_the_tests(agent, random):
+def seperate_the_tests(agent, random, continuous):
     overall_fitness = 0
     test_fitness = [0 for i in range(number_of_tests + 1)]
     index = 0
@@ -729,12 +738,12 @@ def seperate_the_tests(agent, random):
             else:
                 distance_segment = (beam_length * (starting_position_max - starting_position_min)) / (segments - 1)
             for i in range(segments):
-                test_fitness[index] = seperate_test(agent, 0, (beam_length*starting_position_max)-(distance_segment * i))
+                test_fitness[index] = seperate_test(agent, 0, (beam_length*starting_position_max)-(distance_segment * i), continuous)
                 if test_fitness[index] < 0:
                     overall_fitness += test_fitness[index]
                 index += 1
             for i in range(segments):
-                test_fitness[index] = seperate_test(agent, 0, -(beam_length*starting_position_max)+(distance_segment * i))
+                test_fitness[index] = seperate_test(agent, 0, -(beam_length*starting_position_max)+(distance_segment * i), continuous)
                 if test_fitness[index] < 0:
                     overall_fitness += test_fitness[index]
                 index += 1
@@ -742,7 +751,7 @@ def seperate_the_tests(agent, random):
             angle_segment = ((min_angle - max_angle) * starting_angle_max) / (number_of_tests - 1)
             first_postion = min_angle + ((min_angle - max_angle) * (1-starting_angle_max)) #wrong
             for i in range(number_of_tests):
-                test_fitness[i] = seperate_test(agent, first_postion+(angle_segment*i), beam_length*starting_position_max)
+                test_fitness[i] = seperate_test(agent, first_postion+(angle_segment*i), beam_length*starting_position_max, continuous)
                 if test_fitness[i] < 0:
                     overall_fitness += test_fitness[i]
         else:
@@ -753,7 +762,7 @@ def seperate_the_tests(agent, random):
             if np.random.uniform(0,1) < 0.5:
                 random_distance *= -1
             random_angle = np.random.uniform(min_angle, max_angle)
-            test_fitness[i] = seperate_test(agent, random_angle, random_distance)
+            test_fitness[i] = seperate_test(agent, random_angle, random_distance, continuous)
             if test_fitness[i] < 0:
                 overall_fitness += test_fitness[i]
     test_fitness[number_of_tests] = overall_fitness
@@ -763,12 +772,12 @@ def seperate_the_tests(agent, random):
     return test_fitness
 
 #tests a particular agent on the required configuration of tests
-def ball_and_beam_tests(agent, combined, random):
+def ball_and_beam_tests(agent, combined, random, continuous):
     if combined == False:
         print 'not combined, reroll every time'
     else:
         create_spinn_net(agent)
-        agent_data = seperate_the_tests(agent, random)
+        agent_data = seperate_the_tests(agent, random, continuous)
     return agent_data
 
 # test population (all combos of 3 evo properties, or pos not depends on construction)
@@ -782,6 +791,7 @@ def ball_and_beam_tests(agent, combined, random):
 def bubble_sort(criteria_1, criteria_2, criteria_3):
     length = len(criteria_1)
     order = [i for i in range(length)]
+    equal_index = [[0 for i in range(length)] for i in range(length)]
     for i in range(length):
         for j in range(length - i - 1):
             if criteria_1[order[j]] < criteria_1[order[j+1]]:
@@ -798,6 +808,29 @@ def bubble_sort(criteria_1, criteria_2, criteria_3):
                         temp = order[j+1]
                         order[j+1] = order[j]
                         order[j] = temp
+    for i in range(length):
+        for j in range(length):
+            if criteria_1[order[i]] == criteria_1[order[j]]:
+                if criteria_2[order[i]] == criteria_2[order[j]]:
+                    if criteria_3[order[i]] == criteria_3[order[j]]:
+                        equal_index[order[i]][order[j]] = 1
+                        equal_index[order[i]][order[j]] = 1
+    i = 0
+    while i < length:
+        similarities = 0
+        listed_equals = []
+        for j in range(length):
+            if equal_index[order[i]][order[j]] == 1:
+                similarities += 1
+                listed_equals.append(order[j])
+        if similarities != 1:
+            for j in range(similarities):
+                rand_int = np.random.randint(0, similarities-j)
+                order[i+j] = listed_equals[rand_int]
+                del listed_equals[rand_int]
+        i += similarities
+
+
     return order
 
 #compute the fitnesses passed in and rank accordingly
@@ -830,8 +863,9 @@ for gen in range(number_of_generations):
             fitnesses2 = []
             for agent in range(map_pop_size):
                 print 'starting agent {}'.format(agent)
-                fitness = ball_and_beam_tests(agent, True, False)
-                #fitness = [agent, np.random.randint(0,10), np.random.randint(3,9), np.random.randint(0,10), np.random.randint(3,9), np.random.randint(0,10), np.random.randint(3,9)]
+                #fitness = ball_and_beam_tests(agent, True, False, True)
+                number_of_tests = 7
+                fitness = [np.random.randint(0,2), np.random.randint(3,4), np.random.randint(0,2), np.random.randint(3,4), np.random.randint(0,2), np.random.randint(3,4), np.random.randint(0,2), np.random.randint(3,4)]
                 copy_fitness = copy.deepcopy(fitness)
                 port_offset += 1
                 fitnesses.append(fitness[:])
