@@ -1,17 +1,17 @@
 import spynnaker8 as p
-from pyNN.utility.plotting import Figure, Panel
+# from pyNN.utility.plotting import Figure, Panel
 import time
 import copy
-import pylab
+# import pylab
 import numpy as np
 import threading
-from threading import Condition
-import matplotlib.pyplot as plt
-from matplotlib import gridspec
+# from threading import Condition
+# import matplotlib.pyplot as plt
+# from matplotlib import gridspec
 from pyNN.random import RandomDistribution# as rand
 #import spynnaker8.spynakker_plotting as splot
-import csv
-import pandas
+# import csv
+# import pandas
 
 #define GA characteristics
 number_of_generations = 20
@@ -19,6 +19,11 @@ cycles_per_generation = 1
 neuron_per_cycle = 1
 chem_per_cycle = 1
 map_per_cycle = 5
+elitism = 0.5
+selecting_scale = 10
+mutation_rate = 0.01
+crossover = 0.5
+stdev_range = 0.15
 
 #define the network parameters
 neuron_pop_size = 100
@@ -217,7 +222,7 @@ for i in range(chem_pop_size):
 map_neuron_params = 4
 map_chem_params = 3
 map_params = (2*no_input_pop) + (map_neuron_params*max_neuron_types) + (map_chem_params*max_chem_types)
-map_pop = [[0 for i in range(map_params)] for j in range(map_pop_size)]
+map_pop = [[0 for i in range(map_params)] for j in range(map_pop_size+1)]
 for i in range(map_pop_size):
     #input poisson characteristics
     input_poisson_low = 0
@@ -336,8 +341,12 @@ def poisson_setting(label, connection):
         current_position += float(current_ball_vlct *seconds_window)
         current_beam_vlct += float(current_beam_acc * seconds_window)
         #check that the beam is not at the maximum angle
+        previous_angle = current_angle
         current_angle += float(current_beam_vlct * seconds_window)
         current_angle = max(min(current_angle, max_angle), min_angle)
+        if current_angle == previous_angle:
+            current_beam_acc = 0
+            current_beam_vlct = 0
         print "clock = {}\tanti = {}\ttorque = {}\tpos = {}\tangle = {}".format(clockwise,anticlock,torque,current_position,current_angle)
         #set poisson rate
         current_pos_ratio = max(min((current_position + beam_length) / (beam_length * 2), 1), 0)
@@ -348,9 +357,9 @@ def poisson_setting(label, connection):
         n_number = map_pop[agent][map_neuron_count]
         #set at the precise time needed
         # time.sleep(max((float(i) / 1000.0) - (time.clock() - start), 0))
-        connection.set_rates(input_labels[0], [(i, int(poisson_position)) for i in range(n_number)])
+        connection.set_rates(input_labels[0], [(i, int(round(poisson_position))) for i in range(n_number)])
         n_number = map_pop[agent][map_neuron_count+map_neuron_params]
-        connection.set_rates(input_labels[1], [(i, int(poisson_angle)) for i in range(n_number)])
+        connection.set_rates(input_labels[1], [(i, int(round(poisson_angle))) for i in range(n_number)])
         experimental_record.append([current_position, current_ball_vlct,current_ball_acc,
                                     current_angle, current_beam_vlct, current_beam_acc, time.clock()])
         if abs(current_position) > beam_length:
@@ -419,9 +428,9 @@ def threading_setting(connection, start):
         poisson_angle = min_poisson_angle + ((max_poisson_angle - min_poisson_angle) * current_ang_ratio)
         #print "setting @ {}\tpois ang = {}\tpois pos = {}".format(time.clock(), poisson_angle, poisson_position)
         n_number = map_pop[agent][map_neuron_count]
-        connection.set_rates(input_labels[0], [(i, int(poisson_position)) for i in range(n_number)])
+        connection.set_rates(input_labels[0], [(i,int(round(poisson_position))) for i in range(n_number)])
         n_number = map_pop[agent][map_neuron_count + map_neuron_params]
-        connection.set_rates(input_labels[1], [(i, int(poisson_angle)) for i in range(n_number)])
+        connection.set_rates(input_labels[1], [(i,int(round(poisson_angle))) for i in range(n_number)])
         experimental_record.append([current_position, current_ball_vlct, current_ball_acc,
                                     current_angle, current_beam_vlct, current_beam_acc, time.clock()])
         print "finished setting rate at {}, taking {}".format(time.clock() - start, time.clock() - new_start)
@@ -632,7 +641,8 @@ def create_spinn_net(agent):
             n_pop_labels.append("Output_pop{}/{}-index{}".format(i-no_input_pop, i, n_index))
             output_labels.append("Output_pop{}/{}-index{}".format(i-no_input_pop, i, n_index))
             n_pop_list.append(p.Population(n_number, p.IF_cond_exp(), label=n_pop_labels[i]))
-            p.external_devices.activate_live_output_for(n_pop_list[i], database_notify_port_num=18000 + port_offset)
+            p.external_devices.activate_live_output_for(
+                n_pop_list[i], database_notify_port_num=18000 + port_offset, port=14000 + port_offset)
         #set up all other populations
         else:
             n_pop_labels.append("neuron{}-index{}".format(i,n_index))
@@ -640,13 +650,15 @@ def create_spinn_net(agent):
         # n_pop_list[i].record(["spikes"])
     print "all neurons in the network = ", total_n
     poisson_control = p.external_devices.SpynnakerPoissonControlConnection(poisson_labels=input_labels,
-                                                                           local_port=16000+port_offset)
+                                                                           local_port=16000 + port_offset)
     if thread_input == False:
         poisson_control.add_start_callback(n_pop_list[0].label, poisson_setting)
+        poisson_control.add_start_callback(n_pop_list[1].label, poisson_setting)
     else:
         poisson_control.add_start_callback(n_pop_list[0].label, poisson_threading)
+        poisson_control.add_start_callback(n_pop_list[1].label, poisson_threading)
     live_connection = p.external_devices.SpynnakerLiveSpikesConnection(
-        receive_labels=[n_pop_labels[no_input_pop], n_pop_labels[no_input_pop+1]], local_port=(18000 + port_offset))
+        receive_labels=output_labels, local_port=(18000 + port_offset))
     # live_connection = p.external_devices.SpynnakerLiveSpikesConnection(
     #     receive_labels=output_labels, local_port=(18000 + port_offset))
     for i in range(no_output_pop):
@@ -829,8 +841,6 @@ def bubble_sort(criteria_1, criteria_2, criteria_3):
                 order[i+j] = listed_equals[rand_int]
                 del listed_equals[rand_int]
         i += similarities
-
-
     return order
 
 #compute the fitnesses passed in and rank accordingly
@@ -849,11 +859,121 @@ def rank_fitnesses(mutatable):
             del fitnesses[0]
         order = bubble_sort(number_of_successes, total_fail_time, total_fitness)
     elif mutatable == "chem":
-        print "mutating chemical populations"
+        print "ranking chemical populations"
     else:
-        print "mutating neural populations"
+        print "ranking neural populations"
+    return order
+
+#select a parent based on some metric
+def select_parent(mutatable, not_allowed, prob_dist):
+    if mutatable == "map":
+        total = 0
+        not_allowed = (map_pop_size - 1) - not_allowed
+        for i in range(map_pop_size):
+            if i != not_allowed:
+                total += (i+1) * prob_dist
+        number = np.random.uniform(total)
+        i += 1
+        while number > 0:
+            if i != not_allowed:
+                number -= (i) * prob_dist
+            i -= 1
+        parent = map_pop_size - i
+    elif mutatable == "chem":
+        print "parenting chemical populations"
+    else:
+        print "parenting neural populations"
+    return parent
+
+#mate the map agents
+def mate_maps(parent1, parent2):
+    child = map_pop_size
+    for i in range(map_params):
+        if np.random.uniform(0,1) < crossover:
+            map_pop[child][i] = map_pop[parent1][i]
+        else:
+            map_pop[child][i] = map_pop[parent2][i]
+        if np.random.uniform(0,1) < mutation_rate:
+            if i < map_neuron_index:
+                stdev = stdev_range * (input_poisson_max - input_poisson_min)
+                map_pop[child][i] += np.random.normal(0, stdev)
+                if map_pop[child][i] >= input_poisson_max:
+                    map_pop[child][i] -= (input_poisson_max - input_poisson_min)
+                if map_pop[child][i] < input_poisson_min:
+                    map_pop[child][i] += (input_poisson_max - input_poisson_min)
+            elif i < map_chem_index:
+                if (i - map_neuron_index) % map_neuron_params == 0:
+                    stdev = stdev_range * (neuron_pop_size)
+                    map_pop[child][i] += int(round(np.random.normal(0, stdev)))
+                    if map_pop[child][i] >= neuron_pop_size:
+                        map_pop[child][i] -= neuron_pop_size
+                    if map_pop[child][i] < 0:
+                        map_pop[child][i] += neuron_pop_size
+                elif (i - map_neuron_index) % map_neuron_params < 3:
+                    stdev = stdev_range * (map_size)
+                    map_pop[child][i] += int(round(np.random.normal(0, stdev)))
+                    if map_pop[child][i] >= map_size:
+                        map_pop[child][i] -= map_size
+                    if map_pop[child][i] < 0:
+                        map_pop[child][i] += map_size
+                else:
+                    stdev = stdev_range * (per_cell_max - per_cell_min)
+                    map_pop[child][i] += int(round(np.random.normal(0, stdev)))
+                    if map_pop[child][i] >= per_cell_max:
+                        map_pop[child][i] -= (per_cell_max - per_cell_min)
+                    if map_pop[child][i] < per_cell_min:
+                        map_pop[child][i] += (per_cell_max - per_cell_min)
+            else:
+                if (i - map_chem_index) % map_chem_params == 0:
+                    stdev = stdev_range * (chem_pop_size)
+                    map_pop[child][i] += int(round(np.random.normal(0, stdev)))
+                    if map_pop[child][i] >= chem_pop_size:
+                        map_pop[child][i] -= chem_pop_size
+                    if map_pop[child][i] < 0:
+                        map_pop[child][i] += chem_pop_size
+                else:
+                    stdev = stdev_range * (map_size)
+                    map_pop[child][i] += int(round(np.random.normal(0, stdev)))
+                    if map_pop[child][i] >= map_size:
+                        map_pop[child][i] -= map_size
+                    if map_pop[child][i] < 0:
+                        map_pop[child][i] += map_size
 
 #use the rankings to produce mates
+def mate_agents(mutatable, order):
+    if mutatable == "map":
+        parent1 = select_parent(mutatable, np.inf, selecting_scale)
+        parent2 = select_parent(mutatable, parent1, selecting_scale)
+        if parent1 == parent2:
+            print "fuck"
+        mate_maps(order[parent1], order[parent2])
+    elif mutatable == "chem":
+        print "mating chemical populations"
+    else:
+        print "mating neural populations"
+
+#copy child to new location
+def copy_agent(mutatable, copy, paste):
+    if mutatable == "map":
+        for i in range(map_params):
+            map_pop[paste][i] = map_pop[copy][i]
+    elif mutatable == "chem":
+        print "mating chemical populations"
+    else:
+        print "mating neural populations"
+
+#generate and copy all children
+def off_spring(mutatable):
+    if mutatable == "map":
+        number_replaced = int(round(map_pop_size * (1 - elitism)))
+        order = rank_fitnesses(mutatable)
+        for i in range(number_replaced):
+            mate_agents(mutatable, order)
+            copy_agent(mutatable, map_pop_size, order[map_pop_size-i-1])
+    elif mutatable == "chem":
+        print "birthing chemical populations"
+    else:
+        print "birthing neural populations"
 
 for gen in range(number_of_generations):
     for cycle in range(cycles_per_generation):
@@ -865,13 +985,13 @@ for gen in range(number_of_generations):
                 print 'starting agent {}'.format(agent)
                 #fitness = ball_and_beam_tests(agent, True, False, True)
                 number_of_tests = 7
-                fitness = [np.random.randint(0,2), np.random.randint(3,4), np.random.randint(0,2), np.random.randint(3,4), np.random.randint(0,2), np.random.randint(3,4), np.random.randint(0,2), np.random.randint(3,4)]
+                fitness = [np.random.randint(0,3), np.random.randint(3,5), np.random.randint(0,3), np.random.randint(3,5), np.random.randint(0,3), np.random.randint(3,5), np.random.randint(0,3), np.random.randint(3,5)]
                 copy_fitness = copy.deepcopy(fitness)
                 port_offset += 1
                 fitnesses.append(fitness[:])
                 fitnesses1.append(fitness)
                 fitnesses2.append(copy_fitness)
-            rank_fitnesses("map")
+            off_spring("map")
 
 
 #Test the population
