@@ -18,7 +18,9 @@ number_of_generations = 20
 cycles_per_generation = 1
 neuron_per_cycle = 1
 chem_per_cycle = 1
-map_per_cycle = 5
+base_probability = 1 # the base number each neuron/chemical agent is given to influence it's chance of being chosen
+re_roll = False # whether a chemical marker is simply re-rolled or each bit is individually mutated
+map_per_cycle = 3
 elitism = 0.5
 selecting_scale = 10
 mutation_rate = 0.01
@@ -26,7 +28,7 @@ crossover = 0.5
 stdev_range = 0.15
 
 #define the network parameters
-neuron_pop_size = 100
+neuron_pop_size = 150
 chem_pop_size = 100
 map_pop_size = 10
 input_poisson_min = 1
@@ -36,7 +38,7 @@ held_input_pop_size = 0
 marker_length = 7
 map_size = 4 #keeping fixed for now but in future could be adjustable by the GA
 per_cell_min = 20
-per_cell_max = 50
+per_cell_max = 250
 #input comprised of:
     #position of the ball
     #angle of the beam
@@ -88,6 +90,8 @@ up = 3
 port_offset = 0
 running_status = False
 live_connection = p.external_devices.SpynnakerLiveSpikesConnection(local_port=(1800 + port_offset))
+poisson_control = p.external_devices.SpynnakerPoissonControlConnection(poisson_labels=input_labels,
+                                                                           local_port=1600 + port_offset)
 
 #initialise population or possibly read in from text file
 
@@ -140,7 +144,9 @@ lvl_stop_max = 2   #arbitrary atm
 lvl_noise_min = 0   #arbitrary atm
 lvl_noise_max = 5  #arbitrary atm
 neuron_params = 9
-neuron_pop = [[0 for i in range(neuron_params)] for j in range(neuron_pop_size)]
+temp_neuron_pop_size = int(round(neuron_pop_size * (1 - elitism)))
+temp_neuron_pop = [[0 for i in range(neuron_params)] for j in range(temp_neuron_pop_size)]
+neuron_pop = [[0 for i in range(neuron_params)] for j in range(neuron_pop_size+1)]
 for i in range(neuron_pop_size):
     #excititory probability
     excite_index = 0
@@ -188,7 +194,9 @@ decay_max = 2
 strength_min = 0    #arbitrary atm
 strength_max = 15   #arbitrary atm
 chem_params = 3
-chem_pop = [[0 for i in range(chem_params)] for j in range(chem_pop_size)]
+temp_chem_pop_size = int(round(chem_pop_size * (1 - elitism)))
+temp_chem_pop = [[0 for i in range(chem_params)] for j in range(temp_chem_pop_size)]
+chem_pop = [[0 for i in range(chem_params)] for j in range(chem_pop_size+1)]
 for i in range(chem_pop_size):
     #decay constant
     chem_pop[i][0] = np.random.uniform(decay_min,decay_max)
@@ -196,7 +204,6 @@ for i in range(chem_pop_size):
     chem_pop[i][1] = np.random.uniform(strength_min,strength_max)
     #chemical marker
     chem_pop[i][2] = np.random.randint(0,np.power(2,marker_length))
-
 
 #2D map orientation - maybe seperate for neurons and chemical
     #position on input and output neural populations
@@ -222,6 +229,8 @@ for i in range(chem_pop_size):
 map_neuron_params = 4
 map_chem_params = 3
 map_params = (2*no_input_pop) + (map_neuron_params*max_neuron_types) + (map_chem_params*max_chem_types)
+temp_map_pop_size = int(round(map_pop_size * (1 - elitism)))
+temp_map_pop = [[0 for i in range(map_params)] for j in range(temp_map_pop_size)]
 map_pop = [[0 for i in range(map_params)] for j in range(map_pop_size+1)]
 for i in range(map_pop_size):
     #input poisson characteristics
@@ -263,6 +272,8 @@ for i in range(map_pop_size):
 def marker_bits(marker_no):
     bit_string = [0 for i in range(marker_length)]
     bit_string[0] = marker_no%2
+    if bit_string[0] == 0:
+        bit_string[0] = -1
     marker_no -= bit_string[0]
     for i in range(1,marker_length):
         #marker_no = marker_no - (np.power(2,(i-1))*bit_string[i-1])
@@ -281,7 +292,7 @@ def receive_spikes(label, time, neuron_ids):
         for i in range(no_output_pop):
             if label == output_labels[i]:
                 motor_spikes[i] += 1
-                print "\n\nmotor {} - time = {}\n\n".format(i, time)
+                #print "\n\nmotor {} - time = {}\n\n".format(i, time)
 
 #adjusts the poisson inputs live during a run
 def poisson_setting(label, connection):
@@ -353,7 +364,7 @@ def poisson_setting(label, connection):
         poisson_position = min_poisson_dist + ((max_poisson_dist - min_poisson_dist) * current_pos_ratio)
         current_ang_ratio = (current_angle + max_angle) / (max_angle * 2)
         poisson_angle = min_poisson_angle + ((max_poisson_angle - min_poisson_angle) * current_ang_ratio)
-        print "\tpoisson angle = {}\tposition = {}".format(poisson_angle, poisson_position)
+        #print "\tpoisson angle = {}\tposition = {}".format(poisson_angle, poisson_position)
         n_number = map_pop[agent][map_neuron_count]
         #set at the precise time needed
         # time.sleep(max((float(i) / 1000.0) - (time.clock() - start), 0))
@@ -607,10 +618,11 @@ def neuron2neuron(agent, neuron):
 def create_spinn_net(agent):
     global port_offset
     global live_connection
+    global poisson_control
     global input_labels
     global output_labels
     p.setup(timestep=1.0, min_delay=1, max_delay=(delay_mean_max+(4*delay_stdev_max)))
-    p.set_number_of_neurons_per_core(p.IF_cond_exp, 32)
+    p.set_number_of_neurons_per_core(p.IF_cond_exp, 64)
     #initialise the variable and reset if multiple run
     n_pop_labels = []
     n_pop_list = []
@@ -649,14 +661,15 @@ def create_spinn_net(agent):
             n_pop_list.append(p.Population(n_number, p.IF_cond_exp(), label=n_pop_labels[i]))
         # n_pop_list[i].record(["spikes"])
     print "all neurons in the network = ", total_n
+
     poisson_control = p.external_devices.SpynnakerPoissonControlConnection(poisson_labels=input_labels,
                                                                            local_port=16000 + port_offset)
     if thread_input == False:
         poisson_control.add_start_callback(n_pop_list[0].label, poisson_setting)
-        poisson_control.add_start_callback(n_pop_list[1].label, poisson_setting)
+        # poisson_control.add_start_callback(n_pop_list[1].label, poisson_setting)
     else:
         poisson_control.add_start_callback(n_pop_list[0].label, poisson_threading)
-        poisson_control.add_start_callback(n_pop_list[1].label, poisson_threading)
+        # poisson_control.add_start_callback(n_pop_list[1].label, poisson_threading)
     live_connection = p.external_devices.SpynnakerLiveSpikesConnection(
         receive_labels=output_labels, local_port=(18000 + port_offset))
     # live_connection = p.external_devices.SpynnakerLiveSpikesConnection(
@@ -680,6 +693,8 @@ def create_spinn_net(agent):
                 con_excite_prob = connection_list[j] * excite_prob
                 con_inhib_prob = connection_list[j] * (1 - excite_prob)
                 print "{}\t{}".format(con_excite_prob, con_inhib_prob)
+                print "weight mu = {}\t stdev = {}".format(weight_mu, weight_sdtev)
+                print "delay mu = {}\t stdev = {}".format(delay_mu, delay_sdtev)
                 weights = RandomDistribution("normal_clipped", mu=weight_mu, sigma=weight_sdtev, low=0, high=np.inf)
                 delays = RandomDistribution("normal_clipped", mu=delay_mu, sigma=delay_sdtev, low=1, high=delay_cap)
                 synapse = p.StaticSynapse(weight=weights, delay=delays)
@@ -739,6 +754,8 @@ def seperate_test(agent, angle, distance, continuous):
     return running_fitness
 
 def seperate_the_tests(agent, random, continuous):
+    global live_connection
+    global poisson_control
     overall_fitness = 0
     test_fitness = [0 for i in range(number_of_tests + 1)]
     index = 0
@@ -778,6 +795,8 @@ def seperate_the_tests(agent, random, continuous):
             if test_fitness[i] < 0:
                 overall_fitness += test_fitness[i]
     test_fitness[number_of_tests] = overall_fitness
+    #maybe change these to instantiations of p.external devices instead as that's global?
+    poisson_control.close()
     live_connection.close()
     live_connection._handle_possible_rerun_state()
     p.end()
@@ -844,7 +863,7 @@ def bubble_sort(criteria_1, criteria_2, criteria_3):
     return order
 
 #compute the fitnesses passed in and rank accordingly
-def rank_fitnesses(mutatable):
+def rank_fitnesses(mutatable, by_rank):
     global fitnesses
     if mutatable == "map":
         number_of_successes = [number_of_tests for i in range(map_pop_size)]
@@ -859,30 +878,64 @@ def rank_fitnesses(mutatable):
             del fitnesses[0]
         order = bubble_sort(number_of_successes, total_fail_time, total_fitness)
     elif mutatable == "chem":
-        print "ranking chemical populations"
+        chem_type_counter = [base_probability for i in range(chem_pop_size)]
+        for i in range(map_pop_size):
+            for j in range(max_chem_types):
+                chem_type = map_pop[i][map_chem_index + (j * map_chem_params)]
+                chem_type_counter[chem_type] += 1
+        if by_rank == True:
+            order = bubble_sort(chem_type_counter, chem_type_counter, chem_type_counter)
+        else:
+            order = chem_type_counter
     else:
-        print "ranking neural populations"
+        neuron_type_counter = [base_probability for i in range(neuron_pop_size)]
+        for i in range(map_pop_size):
+            for j in range(max_neuron_types):
+                neuron_type = map_pop[i][map_neuron_index + (j * map_neuron_params)]
+                neuron_type_counter[neuron_type] += 1
+        if by_rank == True:
+            order = bubble_sort(neuron_type_counter, neuron_type_counter, neuron_type_counter)
+        else:
+            order = neuron_type_counter
     return order
 
 #select a parent based on some metric
 def select_parent(mutatable, not_allowed, prob_dist):
     if mutatable == "map":
+        #possibly change it to a non linear prob_dist later but for now pointless (linear)
         total = 0
         not_allowed = (map_pop_size - 1) - not_allowed
         for i in range(map_pop_size):
             if i != not_allowed:
                 total += (i+1) * prob_dist
         number = np.random.uniform(total)
-        i += 1
         while number > 0:
             if i != not_allowed:
-                number -= (i) * prob_dist
+                number -= (i+1) * prob_dist
             i -= 1
-        parent = map_pop_size - i
+        parent = map_pop_size - (i + 2)
     elif mutatable == "chem":
-        print "parenting chemical populations"
+        total = 0
+        for i in range(chem_pop_size):
+            if i != not_allowed:
+                total += prob_dist[i]
+        number = np.random.uniform(total)
+        while number > 0:
+            if i != not_allowed:
+                number -= prob_dist[i]
+            i -= 1
+        parent = i+1
     else:
-        print "parenting neural populations"
+        total = 0
+        for i in range(neuron_pop_size):
+            if i != not_allowed:
+                total += prob_dist[i]
+        number = np.random.uniform(total)
+        while number > 0:
+            if i != not_allowed:
+                number -= prob_dist[i]
+            i -= 1
+        parent = i+1
     return parent
 
 #mate the map agents
@@ -939,6 +992,114 @@ def mate_maps(parent1, parent2):
                     if map_pop[child][i] < 0:
                         map_pop[child][i] += map_size
 
+#mate the neuron agents
+def mate_neurons(parent1, parent2):
+    child = neuron_pop_size
+    for i in range(neuron_params):
+        if np.random.uniform(0,1) < crossover:
+            neuron_pop[child][i] = neuron_pop[parent1][i]
+        else:
+            neuron_pop[child][i] = neuron_pop[parent2][i]
+        if np.random.uniform(0,1) < mutation_rate:
+            if i == excite_index:
+                full_range = (excite_max - excite_min)
+                maximum = excite_max
+                minimum = excite_min
+            elif i == connect_prob_index:
+                full_range = (connect_prob_max - connect_prob_min)
+                maximum = connect_prob_max
+                minimum = connect_prob_min
+            elif i == weight_mean_index:
+                full_range = (weight_mean_max - weight_mean_min)
+                maximum = weight_mean_max
+                minimum = weight_mean_min
+            elif i == weight_stdev_index:
+                full_range = (weight_stdev_max - weight_stdev_min)
+                maximum = weight_stdev_max
+                minimum = weight_stdev_min
+            elif i == delay_mean_index:
+                full_range = (delay_mean_max - delay_mean_min)
+                maximum = delay_mean_max
+                minimum = delay_mean_min
+            elif i == delay_stdev_index:
+                full_range = (delay_stdev_max - delay_stdev_min)
+                maximum = delay_stdev_max
+                minimum = delay_stdev_min
+            elif i == lvl_stop_index:
+                full_range = (lvl_stop_max - lvl_stop_min)
+                maximum = lvl_stop_max
+                minimum = lvl_stop_min
+            elif i == lvl_noise_index:
+                full_range = (lvl_noise_max - lvl_noise_min)
+                maximum = lvl_noise_max
+                minimum = lvl_noise_min
+            elif i == chem_marker_index:
+                if re_roll == True:
+                    neuron_pop[child][i] = np.random.randint(0, np.power(2, marker_length))
+                else:
+                    print "going to reroll them later"
+            else:
+                print "fuck"
+            if i != chem_marker_index:
+                stdev = stdev_range * full_range
+                neuron_pop[child][i] += np.random.normal(0, stdev)
+                if neuron_pop[child][i] >= maximum:
+                    neuron_pop[child][i] -= full_range
+                if neuron_pop[child][i] < minimum:
+                    neuron_pop[child][i] += full_range
+    if re_roll == False:
+        for i in range(marker_length):
+            bit_string = marker_bits(neuron_pop[child][chem_marker_index])
+            if np.random.uniform(0, 1) < mutation_rate:
+                if bit_string[i] == 1:
+                    neuron_pop[child][chem_marker_index] -= np.power(2, i)
+                else:
+                    neuron_pop[child][chem_marker_index] += np.power(2, i)
+        if neuron_pop[child][chem_marker_index] >= np.power(2, marker_length) or neuron_pop[child][chem_marker_index] < 0:
+            print "fuck"
+
+#mate the chemical agents
+def mate_chemicals(parent1, parent2):
+    child = chem_pop_size
+    for i in range(chem_params):
+        if np.random.uniform(0, 1) < crossover:
+            chem_pop[child][i] = chem_pop[parent1][i]
+        else:
+            chem_pop[child][i] = chem_pop[parent2][i]
+        if np.random.uniform(0, 1) < mutation_rate:
+            if i == 0:
+                full_range = (decay_max - decay_min)
+                maximum = decay_max
+                minimum = decay_min
+            elif i == 1:
+                full_range = (strength_max - strength_min)
+                maximum = strength_max
+                minimum = strength_min
+            elif i == 2:
+                if re_roll == True:
+                    chem_pop[child][i] = np.random.randint(0, np.power(2, marker_length))
+                else:
+                    print "going to reroll them later"
+            else:
+                print "fuck"
+            if i != 2:
+                stdev = stdev_range * full_range
+                chem_pop[child][i] += np.random.normal(0, stdev)
+                if chem_pop[child][i] >= maximum:
+                    chem_pop[child][i] -= full_range
+                if chem_pop[child][i] < minimum:
+                    chem_pop[child][i] += full_range
+    if re_roll == False:
+        for i in range(marker_length):
+            bit_string = marker_bits(chem_pop[child][2])
+            if np.random.uniform(0, 1) < mutation_rate:
+                if bit_string[i] == 1:
+                    chem_pop[child][2] -= np.power(2, i)
+                else:
+                    chem_pop[child][2] += np.power(2, i)
+        if chem_pop[child][2] >= np.power(2, marker_length) or chem_pop[child][2] < 0:
+            print "fuck"
+
 #use the rankings to produce mates
 def mate_agents(mutatable, order):
     if mutatable == "map":
@@ -948,32 +1109,76 @@ def mate_agents(mutatable, order):
             print "fuck"
         mate_maps(order[parent1], order[parent2])
     elif mutatable == "chem":
-        print "mating chemical populations"
+        parent1 = select_parent(mutatable, np.inf, order)
+        parent2 = select_parent(mutatable, parent1, order)
+        if parent1 == parent2:
+            print "fuck"
+        mate_chemicals(parent1, parent2)
     else:
-        print "mating neural populations"
+        parent1 = select_parent(mutatable, np.inf, order)
+        parent2 = select_parent(mutatable, parent1, order)
+        if parent1 == parent2:
+            print "fuck"
+        mate_neurons(parent1, parent2)
 
 #copy child to new location
-def copy_agent(mutatable, copy, paste):
+def copy_agent(mutatable, copy, paste, temp):
     if mutatable == "map":
-        for i in range(map_params):
-            map_pop[paste][i] = map_pop[copy][i]
+        if temp == "pop to temp":
+            for i in range(map_params):
+                temp_map_pop[paste][i] = map_pop[copy][i]
+        elif temp == "temp to pop":
+            for i in range(map_params):
+                map_pop[paste][i] = temp_map_pop[copy][i]
+        else:
+            for i in range(map_params):
+                map_pop[paste][i] = map_pop[copy][i]
     elif mutatable == "chem":
-        print "mating chemical populations"
+        if temp == "pop to temp":
+            for i in range(chem_params):
+                temp_chem_pop[paste][i] = chem_pop[copy][i]
+        elif temp == "temp to pop":
+            for i in range(chem_params):
+                chem_pop[paste][i] = temp_chem_pop[copy][i]
+        else:
+            for i in range(chem_params):
+                chem_pop[paste][i] = chem_pop[copy][i]
     else:
-        print "mating neural populations"
+        if temp == "pop to temp":
+            for i in range(neuron_params):
+                temp_neuron_pop[paste][i] = neuron_pop[copy][i]
+        elif temp == "temp to pop":
+            for i in range(neuron_params):
+                neuron_pop[paste][i] = temp_neuron_pop[copy][i]
+        else:
+            for i in range(neuron_params):
+                neuron_pop[paste][i] = neuron_pop[copy][i]
 
 #generate and copy all children
 def off_spring(mutatable):
     if mutatable == "map":
-        number_replaced = int(round(map_pop_size * (1 - elitism)))
-        order = rank_fitnesses(mutatable)
-        for i in range(number_replaced):
+        order = rank_fitnesses(mutatable, False)
+        for i in range(temp_map_pop_size):
             mate_agents(mutatable, order)
-            copy_agent(mutatable, map_pop_size, order[map_pop_size-i-1])
+            copy_agent(mutatable, map_pop_size, i, "pop to temp")
+        for i in range(temp_map_pop_size):
+            copy_agent(mutatable, i, order[map_pop_size-i-1], "temp to pop")
     elif mutatable == "chem":
-        print "birthing chemical populations"
+        order = rank_fitnesses(mutatable, False)
+        for i in range(temp_chem_pop_size):
+            mate_agents(mutatable, order)
+            copy_agent(mutatable, chem_pop_size, i, "pop to temp")
+        order = rank_fitnesses(mutatable, True)
+        for i in range(temp_chem_pop_size):
+            copy_agent(mutatable, i, order[chem_pop_size-i-1], "temp to pop")
     else:
-        print "birthing neural populations"
+        order = rank_fitnesses(mutatable, False)
+        for i in range(temp_neuron_pop_size):
+            mate_agents(mutatable, order)
+            copy_agent(mutatable, neuron_pop_size, i, "pop to temp")
+        order = rank_fitnesses(mutatable, True)
+        for i in range(temp_neuron_pop_size):
+            copy_agent(mutatable, i, order[neuron_pop_size-i-1], "temp to pop")
 
 for gen in range(number_of_generations):
     for cycle in range(cycles_per_generation):
@@ -983,15 +1188,19 @@ for gen in range(number_of_generations):
             fitnesses2 = []
             for agent in range(map_pop_size):
                 print 'starting agent {}'.format(agent)
-                #fitness = ball_and_beam_tests(agent, True, False, True)
-                number_of_tests = 7
-                fitness = [np.random.randint(0,3), np.random.randint(3,5), np.random.randint(0,3), np.random.randint(3,5), np.random.randint(0,3), np.random.randint(3,5), np.random.randint(0,3), np.random.randint(3,5)]
+                fitness = ball_and_beam_tests(agent, True, False, False)
+                # number_of_tests = 7
+                # fitness = [np.random.randint(0,3), np.random.randint(3,5), np.random.randint(0,3), np.random.randint(3,5), np.random.randint(0,3), np.random.randint(3,5), np.random.randint(0,3), np.random.randint(3,5)]
                 copy_fitness = copy.deepcopy(fitness)
                 port_offset += 1
                 fitnesses.append(fitness[:])
                 fitnesses1.append(fitness)
                 fitnesses2.append(copy_fitness)
             off_spring("map")
+        for neuron_agent in range(neuron_per_cycle):
+            off_spring("neuron")
+        for chem_agent in range(chem_per_cycle):
+            off_spring("chem")
 
 
 #Test the population
