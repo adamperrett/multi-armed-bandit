@@ -30,7 +30,7 @@ stdev_range = 0.15
 #define the network parameters
 neuron_pop_size = 150
 chem_pop_size = 100
-map_pop_size = 10
+map_pop_size = 20
 input_poisson_min = 1
 input_poisson_max = 50
 thread_input = False
@@ -53,7 +53,7 @@ max_chem_types = 5 #keeping fixed for now but in future could be adjustable by t
 
 #define experimental paramters
 number_of_tests = 2
-duration = 2000 #ms
+duration = 4000 #ms
 time_segments = 200 #duration of a segment
 average_runtime = 0.1 #time it takes to complete the setting of poisson variables
 fitness_begin = 0 #segment when fitness calculations begin
@@ -61,10 +61,10 @@ experimental_record = []
 beam_length = 2 #centred half way
 off_the_beam = -np.inf #fitness punishment if it falls off the beam
 g = 9.81
-mass = 0.01
+mass = 1e-3
 radius = 0.01
-moi_ball = 0.0000006
-moi_beam = 0.02
+moi_ball = 6e-7
+moi_beam = 2e-2
 max_angle = np.pi/4
 min_angle = -max_angle
 current_agent = 0
@@ -129,7 +129,7 @@ poisson_control = p.external_devices.SpynnakerPoissonControlConnection(poisson_l
 excite_min = 0
 excite_max = 1
 connect_prob_min = 0
-connect_prob_max = 0.2
+connect_prob_max = 0.25
 weight_mean_min = 0
 weight_mean_max = 0.015
 weight_stdev_min = 0
@@ -318,7 +318,8 @@ def poisson_setting(label, connection):
     start = time.clock()
     for i in range(0, duration, time_segments):
         #set at the precise time needed
-        time.sleep(max((float(i) / 1000.0) - (time.clock() - start), 0))
+        float_time = max((float(i) / 1000.0) - (time.clock() - start), 0)
+        time.sleep(float_time)
         #translate motor commands into movement of the beam and the ball
             # x'' = (x'*theta'^2 - g*sin(theta)) / (1 + moi_ball/(mass*radius^2))
             # theta'' = (torque - mass*g*x*cos(theta) - 2*mass*x*x'*theta') / (mass*x^2 + moi_ball + moi_beam)
@@ -327,7 +328,7 @@ def poisson_setting(label, connection):
             #alternate equations
             #(Ib + ms * rb^2) * thetab'' + (2 * ms * rb * rb' * thetab') + (ms * g * rb * costhetab) = torque
             #thetab'' = (torque - (ms * g * rb * costhetab) - (2 * ms * rb * rb' * thetab')) / (Ib + ms * rb^2)
-            #tb'' = -5/7 * (g * sinthetab - rb * thetab^2)
+            #rb'' = -5/7 * (g * sinthetab - rb * thetab^2)
         clockwise = 0
         anticlock = 0
         for j in range(no_output_pop):
@@ -343,6 +344,7 @@ def poisson_setting(label, connection):
         torque = float(total_clock) * spike_to_torque
         current_ball_acc = (current_ball_vlct*np.power(current_beam_vlct,2)) - (g*np.sin(current_angle))
         current_ball_acc /= (1 + (moi_ball/(mass*np.power(radius,2))))
+        # current_ball_acc = (-5.0/7.0) * ((g * np.sin(current_angle)) - (current_position * np.power(current_beam_vlct, 2)))
         current_beam_acc = (torque - (mass*g*current_position*np.cos(current_angle)) -
                             (2*mass*current_position*current_ball_vlct*current_beam_vlct))
         #current_beam_acc = torque
@@ -373,13 +375,12 @@ def poisson_setting(label, connection):
         connection.set_rates(input_labels[1], [(i, int(round(poisson_angle))) for i in range(n_number)])
         experimental_record.append([current_position, current_ball_vlct,current_ball_acc,
                                     current_angle, current_beam_vlct, current_beam_acc, time.clock()])
-        if abs(current_position) > beam_length:
+        if abs(current_position) > beam_length or time.clock() - start > float(duration) / 1000.0:
             #p.end()
             break
         finish = time.clock()
-        total += (finish - start)
         print "elapsed time = {}\t{} - {}\tave_float = {}".format(finish - start, finish, start, float_time)
-    print 'total = {}, average = {}'.format(total, total/len(experimental_record))
+    #print 'total = {}, average = {}'.format(total, total/len(experimental_record))
 
 #the function which sets the poisson inputs for the threading case
 def threading_setting(connection, start):
@@ -1187,7 +1188,7 @@ for gen in range(number_of_generations):
             fitnesses1 = []
             fitnesses2 = []
             for agent in range(map_pop_size):
-                print 'starting agent {}'.format(agent)
+                print 'starting agent {}/{}/{}/{}'.format(agent, map_agent, cycle, gen)
                 fitness = ball_and_beam_tests(agent, True, False, False)
                 # number_of_tests = 7
                 # fitness = [np.random.randint(0,3), np.random.randint(3,5), np.random.randint(0,3), np.random.randint(3,5), np.random.randint(0,3), np.random.randint(3,5), np.random.randint(0,3), np.random.randint(3,5)]
