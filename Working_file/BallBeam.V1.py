@@ -945,8 +945,11 @@ def select_parent(mutatable, not_allowed, prob_dist):
 #mate the map agents
 def mate_maps(parent1, parent2):
     child = map_pop_size
+    parent = 0
     for i in range(map_params):
         if np.random.uniform(0,1) < crossover:
+            parent += 1
+        if np.power(-1, parent) == 1:
             map_pop[child][i] = map_pop[parent1][i]
         else:
             map_pop[child][i] = map_pop[parent2][i]
@@ -999,8 +1002,11 @@ def mate_maps(parent1, parent2):
 #mate the neuron agents
 def mate_neurons(parent1, parent2):
     child = neuron_pop_size
+    parent = 0
     for i in range(neuron_params):
         if np.random.uniform(0,1) < crossover:
+            parent += 1
+        if np.power(-1, parent) == 1:
             neuron_pop[child][i] = neuron_pop[parent1][i]
         else:
             neuron_pop[child][i] = neuron_pop[parent2][i]
@@ -1065,8 +1071,11 @@ def mate_neurons(parent1, parent2):
 #mate the chemical agents
 def mate_chemicals(parent1, parent2):
     child = chem_pop_size
+    parent = 0
     for i in range(chem_params):
         if np.random.uniform(0, 1) < crossover:
+            parent += 1
+        if np.power(-1, parent) == 1:
             chem_pop[child][i] = chem_pop[parent1][i]
         else:
             chem_pop[child][i] = chem_pop[parent2][i]
