@@ -37,8 +37,8 @@ thread_input = False
 held_input_pop_size = 0
 marker_length = 7
 map_size = 4 #keeping fixed for now but in future could be adjustable by the GA
-per_cell_min = 20
-per_cell_max = 250
+per_cell_min = 10
+per_cell_max = 100
 #input comprised of:
     #position of the ball
     #angle of the beam
@@ -132,7 +132,7 @@ poisson_control = p.external_devices.SpynnakerPoissonControlConnection(poisson_l
 excite_min = 0
 excite_max = 1
 connect_prob_min = 0
-connect_prob_max = 0.25
+connect_prob_max = 0.5
 weight_mean_min = 0
 weight_mean_max = 0.01
 weight_stdev_min = 0
