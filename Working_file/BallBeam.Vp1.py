@@ -96,9 +96,12 @@ up = 3
 
 port_offset = 0
 running_status = False
-live_connection = p.external_devices.SpynnakerLiveSpikesConnection(local_port=(180 + port_offset))
-poisson_control = p.external_devices.SpynnakerPoissonControlConnection(poisson_labels=input_labels,
-                                                                           local_port=160 + port_offset)
+live_connection = []
+poisson_control = []
+for i in range(parallel_agents):
+    live_connection.append(p.external_devices.SpynnakerLiveSpikesConnection(local_port=(180 + i)))
+    poisson_control.append(p.external_devices.SpynnakerPoissonControlConnection(poisson_labels=input_labels,
+                                                                           local_port=160 + i))
 
 #initialise population or possibly read in from text file
 
@@ -690,20 +693,20 @@ def create_spinn_net(agent):
         # n_pop_list[i].record(["spikes"])
     print "all neurons in the network = ", total_n
 
-    poisson_control = p.external_devices.SpynnakerPoissonControlConnection(poisson_labels=input_labels,
+    poisson_control[agent] = p.external_devices.SpynnakerPoissonControlConnection(poisson_labels=input_labels,
                                                                            local_port=16000+agent+port_offset)
     if thread_input == False:
-        poisson_control.add_start_callback(n_pop_list[0].label, poisson_setting)
-        # poisson_control.add_start_callback(n_pop_list[1].label, poisson_setting)
+        poisson_control[agent].add_start_callback(n_pop_list[0].label, poisson_setting)
+        # poisson_control[agent].add_start_callback(n_pop_list[1].label, poisson_setting)
     else:
-        poisson_control.add_start_callback(n_pop_list[0].label, poisson_threading)
-        # poisson_control.add_start_callback(n_pop_list[1].label, poisson_threading)
-    live_connection = p.external_devices.SpynnakerLiveSpikesConnection(
+        poisson_control[agent].add_start_callback(n_pop_list[0].label, poisson_threading)
+        # poisson_control[agent].add_start_callback(n_pop_list[1].label, poisson_threading)
+    live_connection[agent] = p.external_devices.SpynnakerLiveSpikesConnection(
         receive_labels=output_labels, local_port=(18000+agent+port_offset))
-    # live_connection = p.external_devices.SpynnakerLiveSpikesConnection(
+    # live_connection[agent] = p.external_devices.SpynnakerLiveSpikesConnection(
     #     receive_labels=output_labels, local_port=(18000 + port_offset))
     for i in range(no_output_pop):
-        live_connection.add_receive_callback(n_pop_labels[no_input_pop+i], receive_spikes)
+        live_connection[agent].add_receive_callback(n_pop_labels[no_input_pop+i], receive_spikes)
     #connect the populations
     for i in range(max_neuron_types):
         n_selected = i * map_neuron_params
@@ -829,9 +832,10 @@ def seperate_the_tests(agent, random, continuous):
                 overall_fitness += test_fitness[i]
     test_fitness[number_of_tests] = overall_fitness
     #maybe change these to instantiations of p.external devices instead as that's global?
-    poisson_control.close()
-    live_connection.close()
-    live_connection._handle_possible_rerun_state()
+    for i in range(parallel_agents):
+        poisson_control[agent+i].close()
+        live_connection[agent+i].close()
+        live_connection[agent+i]._handle_possible_rerun_state()
     p.end()
     return test_fitness
 
