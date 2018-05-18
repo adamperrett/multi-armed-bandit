@@ -33,6 +33,8 @@ chem_pop_size = 100
 map_pop_size = 20
 input_poisson_min = 1
 input_poisson_max = 20
+bkgnd_poisson_min = 1
+bkgnd_poisson_max = 5
 thread_input = False
 held_input_pop_size = 0
 marker_length = 7
@@ -132,7 +134,7 @@ poisson_control = p.external_devices.SpynnakerPoissonControlConnection(poisson_l
 excite_min = 0
 excite_max = 1
 connect_prob_min = 0
-connect_prob_max = 0.5
+connect_prob_max = 0.15
 weight_mean_min = 0
 weight_mean_max = 0.01
 weight_stdev_min = 0
@@ -146,7 +148,7 @@ lvl_stop_min = 0    #arbitrary atm
 lvl_stop_max = 2   #arbitrary atm
 lvl_noise_min = 0   #arbitrary atm
 lvl_noise_max = 5  #arbitrary atm
-neuron_params = 9
+neuron_params = 12
 temp_neuron_pop_size = int(round(neuron_pop_size * (1 - elitism)))
 temp_neuron_pop = [[0 for i in range(neuron_params)] for j in range(temp_neuron_pop_size)]
 neuron_pop = [[0 for i in range(neuron_params)] for j in range(neuron_pop_size+1)]
@@ -178,7 +180,15 @@ for i in range(neuron_pop_size):
     #chemical marker
     chem_marker_index = 8
     neuron_pop[i][chem_marker_index] = np.random.randint(0,np.power(2,marker_length))
-
+    #background firing rate
+    background_rate = 9
+    neuron_pop[i][background_rate] = np.random.uniform(bkgnd_poisson_min, bkgnd_poisson_max)
+    #background connection weight mean
+    background_weight_mean = 10
+    neuron_pop[i][background_weight_mean] = np.random.uniform(weight_mean_min, weight_mean_max)
+    #background connection weight stdev
+    background_weight_stdev = 11
+    neuron_pop[i][background_weight_stdev] = np.random.uniform(weight_stdev_min, weight_stdev_max)
 
 #chemical gradients
     #decay constant and shape (in each dimention or uniform)
@@ -631,6 +641,7 @@ def create_spinn_net(agent):
     n_pop_labels = []
     n_pop_list = []
     n_proj_list = []
+    spike_source_list = []
     if port_offset != 0:
         for i in range(no_output_pop):
             del output_labels[0]
@@ -650,8 +661,11 @@ def create_spinn_net(agent):
                 n_number = map_pop[agent][map_neuron_count + n_selected]
             n_pop_labels.append("Input_pop{}/{}-index{}".format(i, i, n_index))
             input_labels.append("Input_pop{}/{}-index{}".format(i, i, n_index))
-            n_pop_list.append(p.Population(n_number, p.SpikeSourcePoisson(rate=input_poisson_min), label=n_pop_labels[i]))
+            n_pop_list.append(p.Population(n_number, p.SpikeSourcePoisson(rate=input_poisson_min),
+                                           label=n_pop_labels[i]))
             p.external_devices.add_poisson_live_rate_control(n_pop_list[i],database_notify_port_num=16000 + port_offset)
+            spike_source_list.append("empty")
+            bkgnd_rate = 0
         #set up output pop
         elif i < no_input_pop + no_output_pop:
             n_pop_labels.append("Output_pop{}/{}-index{}".format(i-no_input_pop, i, n_index))
@@ -659,10 +673,17 @@ def create_spinn_net(agent):
             n_pop_list.append(p.Population(n_number, p.IF_cond_exp(), label=n_pop_labels[i]))
             p.external_devices.activate_live_output_for(
                 n_pop_list[i], database_notify_port_num=18000 + port_offset, port=14000 + port_offset)
+            bkgnd_rate = neuron_pop[n_index][background_rate]
+            spike_source_list.append(p.Population(n_number, p.SpikeSourcePoisson(rate=bkgnd_rate),
+                                                  label="source ".format(n_pop_labels[i])))
         #set up all other populations
         else:
             n_pop_labels.append("neuron{}-index{}".format(i,n_index))
             n_pop_list.append(p.Population(n_number, p.IF_cond_exp(), label=n_pop_labels[i]))
+            bkgnd_rate = neuron_pop[n_index][background_rate]
+            spike_source_list.append(p.Population(n_number, p.SpikeSourcePoisson(rate=bkgnd_rate),
+                                                  label="source ".format(n_pop_labels[i])))
+        print "background rate = ", bkgnd_rate
         # n_pop_list[i].record(["spikes"])
     print "all neurons in the network = ", total_n
 
@@ -693,12 +714,20 @@ def create_spinn_net(agent):
         connection_list = neuron2neuron(agent, i)
         #moderate the connection probability based excite probability
         for j in range(no_input_pop, max_neuron_types):
+            bkgnd_mu = neuron_pop[n_index][background_weight_mean]
+            bkgnd_stdev = neuron_pop[n_index][background_weight_stdev]
+            bkgnd_weights = RandomDistribution("normal_clipped", mu=bkgnd_mu, sigma=bkgnd_stdev, low=0, high=np.inf)
+            synapse = p.StaticSynapse(weight=bkgnd_weights, delay=1)
+            n_proj_list.append(p.Projection(spike_source_list[j], n_pop_list[j],
+                                                p.OneToOneConnector(),
+                                                synapse, receptor_type="excitatory"))
             if connection_list[j] > 1e-6:
                 con_excite_prob = connection_list[j] * excite_prob
                 con_inhib_prob = connection_list[j] * (1 - excite_prob)
                 print "{}\t{}".format(con_excite_prob, con_inhib_prob)
-                print "weight mu = {}\t stdev = {}".format(weight_mu, weight_sdtev)
-                print "delay mu = {}\t stdev = {}".format(delay_mu, delay_sdtev)
+                print "\tweight mu = {}\t stdev = {}".format(weight_mu, weight_sdtev)
+                print "\tdelay mu = {}\t stdev = {}".format(delay_mu, delay_sdtev)
+                print "\tbkgnd mu = {}\t stdev = {}".format(bkgnd_mu, bkgnd_stdev)
                 weights = RandomDistribution("normal_clipped", mu=weight_mu, sigma=weight_sdtev, low=0, high=np.inf)
                 delays = RandomDistribution("normal_clipped", mu=delay_mu, sigma=delay_sdtev, low=1, high=delay_cap)
                 synapse = p.StaticSynapse(weight=weights, delay=delays)
@@ -1012,37 +1041,38 @@ def mate_neurons(parent1, parent2):
             neuron_pop[child][i] = neuron_pop[parent2][i]
         if np.random.uniform(0,1) < mutation_rate:
             if i == excite_index:
-                full_range = (excite_max - excite_min)
                 maximum = excite_max
                 minimum = excite_min
             elif i == connect_prob_index:
-                full_range = (connect_prob_max - connect_prob_min)
                 maximum = connect_prob_max
                 minimum = connect_prob_min
             elif i == weight_mean_index:
-                full_range = (weight_mean_max - weight_mean_min)
                 maximum = weight_mean_max
                 minimum = weight_mean_min
             elif i == weight_stdev_index:
-                full_range = (weight_stdev_max - weight_stdev_min)
                 maximum = weight_stdev_max
                 minimum = weight_stdev_min
             elif i == delay_mean_index:
-                full_range = (delay_mean_max - delay_mean_min)
                 maximum = delay_mean_max
                 minimum = delay_mean_min
             elif i == delay_stdev_index:
-                full_range = (delay_stdev_max - delay_stdev_min)
                 maximum = delay_stdev_max
                 minimum = delay_stdev_min
             elif i == lvl_stop_index:
-                full_range = (lvl_stop_max - lvl_stop_min)
                 maximum = lvl_stop_max
                 minimum = lvl_stop_min
             elif i == lvl_noise_index:
-                full_range = (lvl_noise_max - lvl_noise_min)
                 maximum = lvl_noise_max
                 minimum = lvl_noise_min
+            elif i == background_rate:
+                maximum = input_poisson_max
+                minimum = input_poisson_min
+            elif i == background_weight_mean:
+                maximum = weight_mean_max
+                minimum = weight_mean_min
+            elif i == background_weight_stdev:
+                maximum = weight_stdev_max
+                minimum = weight_stdev_min
             elif i == chem_marker_index:
                 if re_roll == True:
                     neuron_pop[child][i] = np.random.randint(0, np.power(2, marker_length))
@@ -1051,6 +1081,7 @@ def mate_neurons(parent1, parent2):
             else:
                 print "fuck"
             if i != chem_marker_index:
+                full_range = maximum - minimum
                 stdev = stdev_range * full_range
                 neuron_pop[child][i] += np.random.normal(0, stdev)
                 if neuron_pop[child][i] >= maximum:
@@ -1081,11 +1112,9 @@ def mate_chemicals(parent1, parent2):
             chem_pop[child][i] = chem_pop[parent2][i]
         if np.random.uniform(0, 1) < mutation_rate:
             if i == 0:
-                full_range = (decay_max - decay_min)
                 maximum = decay_max
                 minimum = decay_min
             elif i == 1:
-                full_range = (strength_max - strength_min)
                 maximum = strength_max
                 minimum = strength_min
             elif i == 2:
@@ -1096,6 +1125,7 @@ def mate_chemicals(parent1, parent2):
             else:
                 print "fuck"
             if i != 2:
+                full_range = maximum - minimum
                 stdev = stdev_range * full_range
                 chem_pop[child][i] += np.random.normal(0, stdev)
                 if chem_pop[child][i] >= maximum:
