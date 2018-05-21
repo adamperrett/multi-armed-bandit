@@ -13,6 +13,8 @@ from pyNN.random import RandomDistribution# as rand
 # import csv
 # import pandas
 
+np.random.seed(27)
+
 #define GA characteristics
 number_of_generations = 20
 cycles_per_generation = 1
@@ -33,14 +35,14 @@ chem_pop_size = 100
 map_pop_size = 20
 input_poisson_min = 1
 input_poisson_max = 20
-bkgnd_poisson_min = 1
-bkgnd_poisson_max = 5
+bkgnd_poisson_min = 0
+bkgnd_poisson_max = 0
 thread_input = False
 held_input_pop_size = 0
 marker_length = 7
 map_size = 4 #keeping fixed for now but in future could be adjustable by the GA
 per_cell_min = 10
-per_cell_max = 100
+per_cell_max = 250
 #input comprised of:
     #position of the ball
     #angle of the beam
@@ -79,7 +81,7 @@ current_beam_vlct= 0
 current_ball_vlct = 0
 current_beam_acc = 0
 current_ball_acc = 0
-spike_to_torque = 0.005
+spike_to_torque = 0.001
 starting_position_min = 0.1 #ratio of the length from the centre
 starting_position_max = 0.8
 starting_angle_max = 1
@@ -134,11 +136,11 @@ poisson_control = p.external_devices.SpynnakerPoissonControlConnection(poisson_l
 excite_min = 0
 excite_max = 1
 connect_prob_min = 0
-connect_prob_max = 0.15
+connect_prob_max = 0.2
 weight_mean_min = 0
-weight_mean_max = 0.01
+weight_mean_max = 0.015
 weight_stdev_min = 0
-weight_stdev_max = 0.003
+weight_stdev_max = 0.005
 delay_mean_min = 2
 delay_mean_max = 40
 delay_stdev_min = 0
@@ -379,7 +381,7 @@ def poisson_setting(label, connection):
         poisson_position = min_poisson_dist + ((max_poisson_dist - min_poisson_dist) * current_pos_ratio)
         current_ang_ratio = (current_angle + max_angle) / (max_angle * 2)
         poisson_angle = min_poisson_angle + ((max_poisson_angle - min_poisson_angle) * current_ang_ratio)
-        #print "\tpoisson angle = {}\tposition = {}".format(poisson_angle, poisson_position)
+        print "\tpoisson angle = {}\tposition = {}".format(poisson_angle, poisson_position)
         n_number = map_pop[agent][map_neuron_count]
         #set at the precise time needed
         # time.sleep(max((float(i) / 1000.0) - (time.clock() - start), 0))
@@ -630,6 +632,7 @@ def neuron2neuron(agent, neuron):
 
 #creates the neural network to be placed on SpiNNaker
 def create_spinn_net(agent):
+    np.random.seed(272727)
     global port_offset
     global live_connection
     global poisson_control
@@ -708,28 +711,31 @@ def create_spinn_net(agent):
         #n_number = map_pop[agent][map_neuron_count + n_selected]
         excite_prob = neuron_pop[n_index][excite_index]
         weight_mu = neuron_pop[n_index][weight_mean_index]
-        weight_sdtev = neuron_pop[n_index][weight_stdev_index]
+        weight_stdev = neuron_pop[n_index][weight_stdev_index]
         delay_mu = neuron_pop[n_index][delay_mean_index]
-        delay_sdtev = neuron_pop[n_index][delay_stdev_index]
+        delay_stdev = neuron_pop[n_index][delay_stdev_index]
         connection_list = neuron2neuron(agent, i)
         #moderate the connection probability based excite probability
         for j in range(no_input_pop, max_neuron_types):
-            bkgnd_mu = neuron_pop[n_index][background_weight_mean]
-            bkgnd_stdev = neuron_pop[n_index][background_weight_stdev]
-            bkgnd_weights = RandomDistribution("normal_clipped", mu=bkgnd_mu, sigma=bkgnd_stdev, low=0, high=np.inf)
-            synapse = p.StaticSynapse(weight=bkgnd_weights, delay=1)
-            n_proj_list.append(p.Projection(spike_source_list[j], n_pop_list[j],
-                                                p.OneToOneConnector(),
-                                                synapse, receptor_type="excitatory"))
+            # bkgnd_mu = neuron_pop[n_index][background_weight_mean]
+            # bkgnd_stdev = neuron_pop[n_index][background_weight_stdev]
+            # bkgnd_weights = RandomDistribution("normal_clipped", mu=bkgnd_mu, sigma=bkgnd_stdev, low=0, high=np.inf)
+            # synapse = p.StaticSynapse(weight=bkgnd_weights, delay=1)
+            # n_proj_list.append(p.Projection(spike_source_list[j], n_pop_list[j],
+            #                                     p.OneToOneConnector(),
+            #                                     synapse, receptor_type="excitatory"))
+            n_number = map_pop[agent][map_neuron_count + n_selected]
+            print "\npop = {}({}) connecting to {}".format(i,n_number,j)
+            #print "\tbkgnd mu = {}\t stdev = {}".format(bkgnd_mu, bkgnd_stdev)
             if connection_list[j] > 1e-6:
                 con_excite_prob = connection_list[j] * excite_prob
                 con_inhib_prob = connection_list[j] * (1 - excite_prob)
-                print "{}\t{}".format(con_excite_prob, con_inhib_prob)
-                print "\tweight mu = {}\t stdev = {}".format(weight_mu, weight_sdtev)
-                print "\tdelay mu = {}\t stdev = {}".format(delay_mu, delay_sdtev)
-                print "\tbkgnd mu = {}\t stdev = {}".format(bkgnd_mu, bkgnd_stdev)
-                weights = RandomDistribution("normal_clipped", mu=weight_mu, sigma=weight_sdtev, low=0, high=np.inf)
-                delays = RandomDistribution("normal_clipped", mu=delay_mu, sigma=delay_sdtev, low=1, high=delay_cap)
+                print "ex = {}\tin = {}".format(con_excite_prob, con_inhib_prob)
+                print "\tweight mu = {}\t stdev = {}".format(weight_mu, weight_stdev)
+                print "\tdelay mu = {}\t stdev = {}".format(delay_mu, delay_stdev)
+                np.random.seed(272727)
+                weights = RandomDistribution("normal_clipped", mu=weight_mu, sigma=weight_stdev, low=0, high=np.inf)
+                delays = RandomDistribution("normal_clipped", mu=delay_mu, sigma=delay_stdev, low=1, high=delay_cap)
                 synapse = p.StaticSynapse(weight=weights, delay=delays)
                 n_proj_list.append(p.Projection(n_pop_list[i], n_pop_list[j],
                                                 p.FixedProbabilityConnector(con_excite_prob),
@@ -1065,8 +1071,8 @@ def mate_neurons(parent1, parent2):
                 maximum = lvl_noise_max
                 minimum = lvl_noise_min
             elif i == background_rate:
-                maximum = input_poisson_max
-                minimum = input_poisson_min
+                maximum = bkgnd_poisson_max
+                minimum = bkgnd_poisson_min
             elif i == background_weight_mean:
                 maximum = weight_mean_max
                 minimum = weight_mean_min
