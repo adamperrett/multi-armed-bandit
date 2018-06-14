@@ -95,7 +95,7 @@ down = 2
 up = 3
 
 port_offset = 0
-running_status = False
+running_status = True
 live_connection = p.external_devices.SpynnakerLiveSpikesConnection(local_port=(1800 + port_offset))
 poisson_control = p.external_devices.SpynnakerPoissonControlConnection(poisson_labels=input_labels,
                                                                            local_port=1600 + port_offset)
@@ -771,23 +771,28 @@ def seperate_test(agent, angle, distance, continuous):
     experimental_record.append([current_position, current_ball_vlct,current_ball_acc,
                                 current_angle, current_beam_vlct, current_beam_acc, time.clock()])
     running_status = True
-    p.run(duration)
-    running_status = False
+    try:
+        p.run(duration)
+    except:
+        running_status = False
     #disect experiemntal data
     experiment_length = len(experimental_record)
     running_fitness = 0
-    for i in range(fitness_begin, experiment_length):
-        if fitness_calculation == "linear":
-            running_fitness -= abs(experimental_record[i][0])
-        elif fitness_calculation == "quadratic":
-            running_fitness -= np.power(experimental_record[i][0], 2)
-        else:
-            print "timed"
-            #calculate how long it took to stablise within a boundary
-        if abs(experimental_record[i][0]) > beam_length:
-            running_fitness = i
-            if off_the_beam > 100000000:
-                break
+    if running_status == False:
+        running_fitness = 0
+    else:
+        for i in range(fitness_begin, experiment_length):
+            if fitness_calculation == "linear":
+                running_fitness -= abs(experimental_record[i][0])
+            elif fitness_calculation == "quadratic":
+                running_fitness -= np.power(experimental_record[i][0], 2)
+            else:
+                print "timed"
+                #calculate how long it took to stablise within a boundary
+            if abs(experimental_record[i][0]) > beam_length:
+                running_fitness = i
+                if off_the_beam > 100000000:
+                    break
     if running_fitness < 0:
         running_fitness /= float(experiment_length-fitness_begin)
     return running_fitness
@@ -809,11 +814,19 @@ def seperate_the_tests(agent, random, continuous):
                 test_fitness[index] = seperate_test(agent, 0, (beam_length*starting_position_max)-(distance_segment * i), continuous)
                 if test_fitness[index] < 0:
                     overall_fitness += test_fitness[index]
+                elif test_fitness[index] == 0:
+                    overall_fitness = -np.inf
+                    break
                 index += 1
             for i in range(segments):
+                if overall_fitness == -np.inf:
+                    break
                 test_fitness[index] = seperate_test(agent, 0, -(beam_length*starting_position_max)+(distance_segment * i), continuous)
                 if test_fitness[index] < 0:
                     overall_fitness += test_fitness[index]
+                elif test_fitness[index] == 0:
+                    overall_fitness = -np.inf
+                    break
                 index += 1
         elif varying == "angle":
             angle_segment = ((min_angle - max_angle) * starting_angle_max) / (number_of_tests - 1)
@@ -822,6 +835,9 @@ def seperate_the_tests(agent, random, continuous):
                 test_fitness[i] = seperate_test(agent, first_postion+(angle_segment*i), beam_length*starting_position_max, continuous)
                 if test_fitness[i] < 0:
                     overall_fitness += test_fitness[i]
+                elif test_fitness[index] == 0:
+                    overall_fitness = -np.inf
+                    break
         else:
             print 'trying to vary both'
     else:
@@ -833,11 +849,15 @@ def seperate_the_tests(agent, random, continuous):
             test_fitness[i] = seperate_test(agent, random_angle, random_distance, continuous)
             if test_fitness[i] < 0:
                 overall_fitness += test_fitness[i]
+            elif test_fitness[index] == 0:
+                overall_fitness = -np.inf
+                break
     test_fitness[number_of_tests] = overall_fitness
     #maybe change these to instantiations of p.external devices instead as that's global?
     poisson_control.close()
     live_connection.close()
     live_connection._handle_possible_rerun_state()
+    #if overall_fitness != -np.inf:
     p.end()
     return test_fitness
 
