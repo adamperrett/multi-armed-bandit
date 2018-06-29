@@ -5,6 +5,7 @@ import copy
 # import pylab
 import numpy as np
 import threading
+import traceback
 # from threading import Condition
 # import matplotlib.pyplot as plt
 # from matplotlib import gridspec
@@ -32,17 +33,17 @@ stdev_range = 0.15
 #define the network parameters
 neuron_pop_size = 150
 chem_pop_size = 100
-map_pop_size = 20
+map_pop_size = 30
 input_poisson_min = 1
 input_poisson_max = 20
 bkgnd_poisson_min = 0
-bkgnd_poisson_max = 0
+bkgnd_poisson_max = 5
 thread_input = False
 held_input_pop_size = 0
 marker_length = 7
 map_size = 4 #keeping fixed for now but in future could be adjustable by the GA
 per_cell_min = 10
-per_cell_max = 250
+per_cell_max = 300
 #input comprised of:
     #position of the ball
     #angle of the beam
@@ -774,6 +775,7 @@ def seperate_test(agent, angle, distance, continuous):
     try:
         p.run(duration)
     except:
+        traceback.print_exc()
         running_status = False
     #disect experiemntal data
     experiment_length = len(experimental_record)
@@ -857,8 +859,8 @@ def seperate_the_tests(agent, random, continuous):
     poisson_control.close()
     live_connection.close()
     live_connection._handle_possible_rerun_state()
-    #if overall_fitness != -np.inf:
-    p.end()
+    if overall_fitness != -np.inf:
+        p.end()
     return test_fitness
 
 #tests a particular agent on the required configuration of tests
@@ -931,7 +933,7 @@ def rank_fitnesses(mutatable, by_rank):
         for i in range(map_pop_size):
             total_fitness[i] = fitnesses[0][number_of_tests]
             for j in range(number_of_tests):
-                if fitnesses[0][j] > 0:
+                if fitnesses[0][j] >= 0:
                     number_of_successes[i] -= 1
                     total_fail_time[i] += fitnesses[0][j]
             del fitnesses[0]
@@ -1176,6 +1178,7 @@ def mate_agents(mutatable, order):
         parent2 = select_parent(mutatable, parent1, selecting_scale)
         if parent1 == parent2:
             print "fuck"
+        print "p1 = {}, order {}\tp2 = {}, order {}".format(parent1, order[parent1], parent2, order[parent2])
         mate_maps(order[parent1], order[parent2])
     elif mutatable == "chem":
         parent1 = select_parent(mutatable, np.inf, order)
@@ -1251,10 +1254,11 @@ def off_spring(mutatable):
 
 for gen in range(number_of_generations):
     for cycle in range(cycles_per_generation):
+        fitnesses1 = []
+        fitnesses2 = []
+        fitnesses3 = []
         for map_agent in range(map_per_cycle):
             fitnesses = []
-            fitnesses1 = []
-            fitnesses2 = []
             for agent in range(map_pop_size):
                 print 'starting agent {}/{}/{}/{}'.format(agent, map_agent, cycle, gen)
                 fitness = ball_and_beam_tests(agent, True, False, False)
@@ -1263,8 +1267,12 @@ for gen in range(number_of_generations):
                 copy_fitness = copy.deepcopy(fitness)
                 port_offset += 1
                 fitnesses.append(fitness[:])
-                fitnesses1.append(fitness)
-                fitnesses2.append(copy_fitness)
+                if map_agent == 0:
+                    fitnesses1.append(fitness)
+                elif map_agent == 1:
+                    fitnesses2.append(copy_fitness)
+                elif map_agent == 2:
+                    fitnesses3.append(fitness)
             off_spring("map")
         for neuron_agent in range(neuron_per_cycle):
             off_spring("neuron")
