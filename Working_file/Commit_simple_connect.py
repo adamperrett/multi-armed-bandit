@@ -81,9 +81,10 @@ from spinn_breakout.visualiser.visualiser import Visualiser
 #             # Update displayed score count
 #             self.score_text.set_text("%u" % self.score)
 #
-X_BITS = 8
+
 
 def thread_visualiser(UDP_PORT):
+    id = UDP_PORT - UDP_PORT1
     print "threadin ", running
     # time.sleep(5)
     visualiser = Visualiser(
@@ -93,14 +94,14 @@ def thread_visualiser(UDP_PORT):
     visualiser.show()
     # visualiser._update()
     while running == True:
-        print "in ", UDP_PORT
+        print "in ", UDP_PORT, id
         # visualiser._update()
         time.sleep(1)
     print "left ", running
     score = visualiser._return_score()
-    return score
+    result[id] = score
 
-
+X_BITS = 8
 Y_BITS = 8
 
 # Game resolution
@@ -140,15 +141,18 @@ p.Projection(spike_input, breakout_pop, p.AllToAllConnector(weights=2))
 #     x_bits=X_BITS, y_bits=Y_BITS)
 
 running = True
-# t = threading.Thread(target=thread_visualiser, args=())
-t = ThreadPool(processes=2)
-r = ThreadPool(processes=2)
-result = t.apply_async(thread_visualiser, [UDP_PORT1])
-result2 = r.apply_async(thread_visualiser, [UDP_PORT2])
+t = threading.Thread(target=thread_visualiser, args=(UDP_PORT1))
+r = threading.Thread(target=thread_visualiser, args=(UDP_PORT1))
+result = [0 for i in range(2)]
+# t = ThreadPool(processes=2)
+# r = ThreadPool(processes=2)
+# result = t.apply_async(thread_visualiser, [UDP_PORT1])
+# result2 = r.apply_async(thread_visualiser, [UDP_PORT2])
 # t.daemon = True
 # Run simulation (non-blocking)
 print "reached here 1"
-# t.start()
+t.start()
+r.start()
 p.run(10000)
 print "reached here 2"
 # visualiser._return_score()
@@ -160,10 +164,10 @@ print "reached here 2"
 # End simulation
 p.end()
 running = False
-score_result = result.get()
-score_result2 = result2.get()
-print "result = ", score_result
-print "result2 = ", score_result2
+# score_result = result.get()
+# score_result2 = result2.get()
+print "result = ", result[0]
+print "result2 = ", result[1]
 
 while 1==1:
     None

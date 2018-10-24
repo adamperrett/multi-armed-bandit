@@ -2,20 +2,21 @@ import spynnaker8 as p
 from pyNN.utility.plotting import Figure, Panel
 import matplotlib.pyplot as plt
 
-def test_levels(rates=(10, 20, 50, 100), weights=(0.005, 0.01, 0.03)):
+def test_levels(rates=(500, 1000), weights=(0.005, 0.0005)):
     counter = 0
     receive_pop = []
     spike_input = []
     p.setup(timestep=1, min_delay=1, max_delay=127)
+    p.set_number_of_neurons_per_core(p.IF_cond_exp, 10)
     for rate in rates:
         for weight in weights:
             pop_size = 10
-            receive_pop.append(p.Population(pop_size, p.IF_cond_exp(label="receive_pop{}-{}".format(rate, weight))))
+            receive_pop.append(p.Population(pop_size, p.IF_cond_exp()))#, label="receive_pop{}-{}".format(rate, weight)))
 
             receive_pop[counter].record(['spikes', 'v'])#["spikes"])
 
             # Connect key spike injector to input population
-            spike_input.append(p.Population(pop_size, p.SpikeSourcePoisson(rate=rate, label="input_connect{}-{}".format(rate, weight))))
+            spike_input.append(p.Population(pop_size, p.SpikeSourcePoisson(rate=rate)))#, label="input_connect{}-{}".format(rate, weight)))
             p.Projection(
                 spike_input[counter], receive_pop[counter], p.OneToOneConnector(), p.StaticSynapse(weight=weight))
 
